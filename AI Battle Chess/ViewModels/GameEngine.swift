@@ -375,8 +375,6 @@ final class GameEngine {
         currentAIColor = board.activeColor
 
         let boardSnapshot = board
-        let historySnapshot = moveHistory
-        let statesSnapshot = boardStates
         let color = board.activeColor
         let gameTurnIndex = moveCount(for: color)
         let gameID = currentGameID
@@ -390,8 +388,6 @@ final class GameEngine {
                 if player.useAppleIntelligence, let appleService = appleIntelligenceService {
                     let appleResult = try await appleService.requestMove(
                         board: boardSnapshot,
-                        moveHistory: historySnapshot,
-                        boardStates: statesSnapshot,
                         color: color,
                         gameID: gameID,
                         gameTurnIndex: gameTurnIndex
@@ -401,8 +397,6 @@ final class GameEngine {
                     let llmResult = try await aiService.requestMove(
                         configurationID: configID,
                         board: boardSnapshot,
-                        moveHistory: historySnapshot,
-                        boardStates: statesSnapshot,
                         color: color,
                         gameID: gameID,
                         gameTurnIndex: gameTurnIndex

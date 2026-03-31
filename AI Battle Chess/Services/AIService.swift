@@ -49,7 +49,7 @@ final class AIService {
         \(theirPieces)
 
         HOW TO RESPOND
-        You will receive the board state, move history, and a list of your legal moves.
+        You will receive the board state and a list of your legal moves.
         You must pick a move from the legal moves list. Do not invent moves.
         Output that move and nothing else.
 
@@ -145,8 +145,6 @@ final class AIService {
     func requestMove(
         configurationID: UUID,
         board: ChessBoard,
-        moveHistory: [ChessMove],
-        boardStates: [ChessBoard],
         color: PieceColor,
         gameID: UUID,
         gameTurnIndex: Int

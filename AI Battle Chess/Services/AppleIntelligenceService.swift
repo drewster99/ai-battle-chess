@@ -33,8 +33,6 @@ final class AppleIntelligenceService {
     /// Uses a single session so correction messages are part of the conversation history.
     func requestMove(
         board: ChessBoard,
-        moveHistory: [ChessMove],
-        boardStates: [ChessBoard],
         color: PieceColor,
         gameID: UUID,
         gameTurnIndex: Int
@@ -59,8 +57,9 @@ final class AppleIntelligenceService {
         print(userPrompt)
         print("[AppleIntelligence] --- END PROMPTS ---")
 
-        // Single session — corrections accumulate in conversation history
-        let session = LanguageModelSession(instructions: systemPrompt)
+        // Session for conversation — corrections accumulate in history.
+        // Recreated on actual errors to start fresh.
+        var session = LanguageModelSession(instructions: systemPrompt)
 
         // The prompt for the current attempt: first time it's the board state,
         // subsequent times it's a correction message
@@ -190,6 +189,7 @@ final class AppleIntelligenceService {
                     )
                 }
                 // On error, reset to a fresh session for next attempt
+                session = LanguageModelSession(instructions: systemPrompt)
                 currentPrompt = userPrompt
             }
         }
