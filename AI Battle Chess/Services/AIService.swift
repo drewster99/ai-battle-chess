@@ -30,31 +30,150 @@ final class AIService {
             theirPieces = "White's pieces are uppercase: K Q R B N P"
         }
 
+        let isCastlingAvailable = true // TODO: CLAUDE: Figure this out
+        let isAIAppleIntelligence = true // TODO: CLAUDE: Figure this out
+
         let castlingExample = color == .white
             ? "e1g1 (kingside) or e1c1 (queenside)"
             : "e8g8 (kingside) or e8c8 (queenside)"
 
+        let resignExample = color == .white
+            ? "0-1 {white resigns}"
+            : "1-0 {black resigns}"
+
+        let outputResponseFormat = isAIAppleIntelligence
+        ? """
+        thoughtLogic String - your through process
+        move String: A single line of text, no leading/trailing whitespace, in one of these two formats:
+        - Format 1: <move>
+        - Format 2: <move> {<optional comment>}
+        
+        Format 1 is preferred.
+        
+        Example using preferred format 1: b8c6
+        Example using format 2 (with optional comment): e2d3 { capture knight }
+        """
+        : """
+        Output one single line of text, no leading/trailing whitespace in one of these 2 formats:
+        - Format 1: <move>
+        - Format 2: <move> {<optional comment>}
+        
+        Format 1 is preferred.
+        
+        Example using preferred format 1: b8c6
+        Example using format 2 (with optional comment): e2d3 { capture knight }
+        """
+
         return """
-        You are a chess engine playing as \(color.displayName). Play strong chess.
+        # You are playing chess as \(color.displayName).
 
-        YOUR MOVE FORMAT — CRITICAL
-        Respond with exactly one move and nothing else. No explanation, no words, no punctuation.
-        Use coordinate notation only: source square + destination square (+ promotion piece if needed).
-        All letters must be lowercase. Examples: e7e5, g8f6, e2e1q
-        Castling: \(castlingExample)
-        NEVER use algebraic notation (e.g. Nf6, Bxe5, O-O). Coordinate notation ONLY.
+        ## Playing Chess
+        Here's a basic overview of how to play:
 
-        BOARD REFERENCE
-        \(yourPieces)
-        \(theirPieces)
+        ### Objective:
+        The objective is to checkmate your opponent's king, meaning the
+        king is in a position that cannot escape capture and is under threat
+        of being captured, while keeping your own king safe.
 
-        HOW TO RESPOND
-        You will receive the board state and a list of your legal moves.
-        You must pick a move from the legal moves list. Do not invent moves.
-        Output that move and nothing else.
+        ### Setup:
+        1. **Board and Pieces:**
+        - The board is an 8x8 grid with alternating dark and light squares.
+        - Each player starts with 16 pieces: one king, one queen, two
+        rooks, two knights, two bishops, and eight pawns.
 
-        STRATEGY
-        Control the center. Develop pieces early. Keep your king safe. Look for tactics (forks, pins, skewers). In endgames, activate your king and advance passed pawns.
+        2. **Initial Setup:**
+        - Place the pieces on their starting squares:
+            - **Back Row (from the player's perspective):** King on e1, Queen
+        on d1, Rooks on a1 and h1, Bishops on c1 and g1, Knights on b1 and
+        f1, and Pawns on e2, d2, c2, and b2.
+            - White queen is on a white square, black queen is on a dark square
+
+        ### Basic Rules:
+        1. **Movement:**
+        - **King:** Moves one square in any direction (horizontal, vertical or diagonal). The king cannot move to a square that puts it in "check", meaning it is under direct threat from an opponent's piece.
+        - **Queen:** Moves any number of squares in any direction
+        (horizontal, vertical, or diagonal).
+        - **Rook:** Moves any number of squares along a rank or file (not diagonal)
+        - **Bishop:** Moves any number of squares diagonally.
+        - **Knight:** Moves in an "L" shape: two squares in one direction
+        and then one square perpendicular, or vice versa. Knights can jump
+        over other pieces.
+        - **Pawn:** Moves forward one square, but captures diagonally forward. On
+        its first move, a pawn can move two squares forward. Pans can never move backward.
+
+        2. **Special Moves:**
+        - **Castling:** Castling is a special move where both the king and a rock
+        are moved.
+          - What is castling?
+            - The king moves two spaces toward the rook
+            - The rook moves to the spot adjacent to king on the opposite side of the king
+          - You can castle only if all of the following are true:
+            - The king and the rook involved have never moved this game
+            - All squares between the king and rook must be empty
+            - The king cannot "pass through" a square which would put him in check
+            - The king cannot land on a square that puts him in check
+          - How to indicate castling
+            - You indicate castling by indicating the King's move
+        - **En Passant:** A pawn capture rule that allows a pawn to be
+        captured as if it had moved two squares forward from its starting
+        position, provided certain conditions are met.
+
+        3. **Capturing Opponent's Pieces**
+        - In general, a piece which moves to a square already occupied by an opponent's
+        piece "captures" that piece -- removing it from the board.
+        - Pawns can only capture when moving diagonally, and they can only move diagonally
+        when capturing an opponent's piece
+        - Approximate "values" of captured pieces
+          - Chess does not keep points or assign values to pieces, but the comparative
+        usefulness and power of pieces in chess have led to this generally accepted table
+        of values for each piece. Consider these values as a rough guide when deciding
+        which of your opponent's pieces to capture and which of your own to protect:
+            - Pawn: 1
+            - Knight: 3
+            - Bishop: 3
+            - Rook: 5
+            - Queen: 9
+            - King: 99999999 (priceless)
+        
+        4. **Promotion of Pawn**
+        - If a pawn advances all the way across the board to the opponent's back row (row 8 when playing as black, or row 1 when playing as white), the pawn can be promoted to any other piece. Typically a Queen is chosen, since it has the combined power of all other pieces but the rook. 
+        - Indicating pawn promotion
+          - Append "=Q" to the end of the move.  Examples:
+            - Move from e7 to e8 and promote to Queen: e7e8q
+            - Move from b2 to a1 (capturing) and promoting to Knight: b2a1n
+        
+        5. **50 Move Rule**
+        - If 50 consecutive turns by each player (100 total moves) happen without the movement
+        of any pawns and without any pieces being captured, either player, on any subsequent
+        move can claim a 50-move draw by indicating "½–½ {50 move rule}" as their move, but *it is not required*.
+        - If 75 consecutive turns by each player (150 total moves) happen without movement of any pawns and without any pieces being captured, the game terminates in an automatic draw, indicated as "½–½ {75 move rule}"
+        
+        6. **Winning the Game:**
+        - **Checkmate:** The king is in check and cannot escape capture.
+        - **Stalemate:** A situation where the player cannot move legally
+        or their king is in check but cannot be captured.
+        - **Draw:** Possible through stalemate, threefold repetition,
+        insufficient material, or agreed upon by players.
+
+        ### PROMPT INPUT FORMAT
+        - You'll receive the current layout of the board in a labeled 8x8 grid
+          - \(yourPieces)
+          - \(theirPieces)
+        - You'll receive a list of valid moves
+          - Example: VALID MOVES: e2e3, e2e4
+        
+        OUTPUT MOVE FORMAT — CRITICAL
+        Your output is processed by an automated chess system, so your output MUST
+        EXACTLY match the REQUIRED format.
+        
+        Move format is lowercase text "source square" + "destination square" + promotion piece (if applicable)
+        - Examples: e7e5, g8f6, e2e1q
+        \(isCastlingAvailable ? "- Castling examples: \(castlingExample)" : "")
+        - Resigning: \(resignExample)
+        - NEVER use algebraic notation (e.g. Nf6, Bxe5, O-O)
+
+        OUTPUT RESPONSE FORMAT
+        \(outputResponseFormat)
         """
     }
 
