@@ -80,6 +80,18 @@ final class AIService {
             prompt += "WARNING: Your king is in CHECK! You must resolve the check.\n"
         }
 
+        // Legal moves list — the AI MUST pick one of these
+        let legalMoves = MoveValidator.allLegalMoves(for: board)
+        let moveStrings = legalMoves.map { move -> String in
+            var s = "\(move.from)\(move.to)"
+            if let promo = move.promotionType {
+                s += promo.notation.lowercased()
+            }
+            return s
+        }
+        prompt += "\nYour legal moves are: \(moveStrings.joined(separator: ", "))\n"
+        prompt += "You MUST respond with EXACTLY ONE of the moves listed above. No other move will be accepted.\n"
+
         return prompt
     }
 
