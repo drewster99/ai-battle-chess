@@ -53,7 +53,7 @@ struct ProviderSettingsView: View {
                         defaultEndpoint: URL(string: "http://localhost:11434")!,
                         requiresAPIKey: false),
         ProviderTemplate(id: "ollama-cloud", name: "Ollama Cloud", apiType: .ollama,
-                        defaultEndpoint: URL(string: "https://ollama.cloud/v1")!,
+                        defaultEndpoint: URL(string: "https://ollama.com")!,
                         requiresAPIKey: true),
         ProviderTemplate(id: "lmstudio", name: "LM Studio (Local)", apiType: .lmStudio,
                         defaultEndpoint: URL(string: "http://localhost:1234/v1")!,
