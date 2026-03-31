@@ -383,25 +383,23 @@ final class GameEngine {
             guard let self else { return }
 
             do {
-                let result: (move: ChessMove, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?)
+                let aiResult: (result: AIMoveResult, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?)
 
                 if player.useAppleIntelligence, let appleService = appleIntelligenceService {
-                    let appleResult = try await appleService.requestMove(
+                    aiResult = try await appleService.requestMove(
                         board: boardSnapshot,
                         color: color,
                         gameID: gameID,
                         gameTurnIndex: gameTurnIndex
                     )
-                    result = (appleResult.move, appleResult.penalties, appleResult.retries, appleResult.activityLog)
                 } else if let configID = player.aiConfigurationID {
-                    let llmResult = try await aiService.requestMove(
+                    aiResult = try await aiService.requestMove(
                         configurationID: configID,
                         board: boardSnapshot,
                         color: color,
                         gameID: gameID,
                         gameTurnIndex: gameTurnIndex
                     )
-                    result = (llmResult.move, llmResult.penalties, llmResult.retries, llmResult.activityLog)
                 } else {
                     throw AIError.noConfigurationSelected
                 }
@@ -409,19 +407,35 @@ final class GameEngine {
                 guard !Task.isCancelled else { return }
 
                 // Record penalties
-                for penalty in result.penalties {
+                for penalty in aiResult.penalties {
                     statistics.aiPenalties[color, default: []].append(penalty)
                 }
-                statistics.aiRetryCount[color, default: 0] += result.retries
+                statistics.aiRetryCount[color, default: 0] += aiResult.retries
 
                 // Store activity log
-                if let log = result.activityLog {
+                if let log = aiResult.activityLog {
                     currentAIActivity[color] = log
                 }
 
                 isAIThinking = false
                 currentAIColor = nil
-                applyMove(result.move)
+
+                // Handle the AI's action
+                switch aiResult.result {
+                case .move(let move):
+                    applyMove(move)
+                case .resignation(let winner):
+                    let gameEnd = GameResult.resignation(winner: winner)
+                    gameResult = gameEnd
+                    isGameActive = false
+                    statusMessage = gameEnd.displayText
+                    finalizeCurrentGame()
+                case .drawClaim(let drawResult):
+                    gameResult = drawResult
+                    isGameActive = false
+                    statusMessage = drawResult.displayText
+                    finalizeCurrentGame()
+                }
 
             } catch {
                 guard !Task.isCancelled else { return }

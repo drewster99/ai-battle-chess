@@ -276,7 +276,7 @@ struct PlayerPanelView: View {
             // System Prompt
             DisclosureGroup("System Prompt") {
                 ScrollView {
-                    Text(AIService.systemPrompt(for: color))
+                    Text(AIService.systemPrompt(for: color, isAppleIntelligence: player.useAppleIntelligence))
                         .font(.caption2.monospaced())
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)

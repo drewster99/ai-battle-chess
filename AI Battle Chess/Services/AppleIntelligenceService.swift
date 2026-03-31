@@ -36,7 +36,7 @@ final class AppleIntelligenceService {
         color: PieceColor,
         gameID: UUID,
         gameTurnIndex: Int
-    ) async throws -> (move: ChessMove, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
+    ) async throws -> (result: AIMoveResult, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
         guard AppleIntelligenceService.isAvailable else {
             print("[AppleIntelligence] ERROR: Apple Intelligence is not available on this device")
             throw AIError.appleIntelligenceUnavailable
@@ -46,7 +46,7 @@ final class AppleIntelligenceService {
         var retries = 0
         var lastActivityLog: AIActivityLog? = nil
 
-        let systemPrompt = AIService.systemPrompt(for: color)
+        let systemPrompt = AIService.systemPrompt(for: color, isAppleIntelligence: true, board: board)
         let userPrompt = AIService.boardStatePrompt(board: board)
 
         print("[AppleIntelligence] ====== REQUEST ======")
@@ -128,6 +128,18 @@ final class AppleIntelligenceService {
                     guidedGenerationResult: guidedResult
                 )
 
+                // Check for resignation or draw claim
+                if let specialResult = AIService.detectSpecialAction(moveText, color: color) {
+                    print("[AppleIntelligence] SPECIAL ACTION detected: \(specialResult)")
+                    print("[AppleIntelligence] ====== END REQUEST ======")
+                    switch specialResult {
+                    case .resignation(let winner):
+                        return (.resignation(winner: winner), penalties, retries, lastActivityLog)
+                    default:
+                        return (.drawClaim(specialResult), penalties, retries, lastActivityLog)
+                    }
+                }
+
                 // Parse the move
                 guard let parsed = PGNFormatter.parseAIMoveNotation(moveText, on: board) else {
                     let correction = AIService.correctionPrompt(badMove: moveText, reason: "could not parse notation", board: board)
@@ -176,7 +188,7 @@ final class AppleIntelligenceService {
                 print("[AppleIntelligence] SUCCESS: \(legalMove.from)\(legalMove.to) (check=\(isCheck), checkmate=\(isCheckmate), retries=\(retries))")
                 print("[AppleIntelligence] ====== END REQUEST ======")
 
-                return (annotatedMove, penalties, retries, lastActivityLog)
+                return (.move(annotatedMove), penalties, retries, lastActivityLog)
             } catch {
                 print("[AppleIntelligence] ERROR attempt \(attempt + 1): \(type(of: error)) — \(error.localizedDescription)")
 

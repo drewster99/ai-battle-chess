@@ -19,7 +19,7 @@ final class AIService {
 
     // MARK: - System Prompt
 
-    static func systemPrompt(for color: PieceColor) -> String {
+    static func systemPrompt(for color: PieceColor, isAppleIntelligence: Bool = false, board: ChessBoard? = nil) -> String {
         let yourPieces: String
         let theirPieces: String
         if color == .white {
@@ -30,8 +30,19 @@ final class AIService {
             theirPieces = "White's pieces are uppercase: K Q R B N P"
         }
 
-        let isCastlingAvailable = true // TODO: CLAUDE: Figure this out
-        let isAIAppleIntelligence = true // TODO: CLAUDE: Figure this out
+        // Check if castling is still possible for this player
+        let isCastlingAvailable: Bool
+        if let board {
+            if color == .white {
+                isCastlingAvailable = board.whiteCanCastleKingside || board.whiteCanCastleQueenside
+            } else {
+                isCastlingAvailable = board.blackCanCastleKingside || board.blackCanCastleQueenside
+            }
+        } else {
+            isCastlingAvailable = true // Default to true when no board is provided
+        }
+
+        let isAIAppleIntelligence = isAppleIntelligence
 
         let castlingExample = color == .white
             ? "e1g1 (kingside) or e1c1 (queenside)"
@@ -267,7 +278,7 @@ final class AIService {
         color: PieceColor,
         gameID: UUID,
         gameTurnIndex: Int
-    ) async throws -> (move: ChessMove, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
+    ) async throws -> (result: AIMoveResult, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
         var penalties: [AIPenalty] = []
         var retries = 0
         var lastActivityLog: AIActivityLog? = nil
@@ -278,7 +289,7 @@ final class AIService {
         let providerModel = "\(provider?.name ?? "unknown")_\(config?.modelID ?? "unknown")"
         let modelLabel = config?.name ?? providerModel
 
-        let systemMessage = AIService.systemPrompt(for: color)
+        let systemMessage = AIService.systemPrompt(for: color, board: board)
         let userMessage = AIService.boardStatePrompt(board: board)
 
         print("[AIService] ====== REQUEST ======")
@@ -359,6 +370,30 @@ final class AIService {
 
                 print("[AIService] Response move text: \"\(moveText)\"")
 
+                // Check for resignation or draw claim before parsing as a move
+                if let specialResult = AIService.detectSpecialAction(moveText, color: color) {
+                    print("[AIService] SPECIAL ACTION detected: \(specialResult)")
+                    print("[AIService] ====== END REQUEST ======")
+                    let activityLog = AIActivityLog(
+                        systemPrompt: systemMessage,
+                        userPrompt: userMessage,
+                        responseText: rawResponseText,
+                        temperature: config?.temperature,
+                        thinkingBudget: config?.thinkingBudget,
+                        maxOutputTokens: config?.maxOutputTokens,
+                        modelName: config?.name ?? "Unknown",
+                        providerName: provider?.name ?? "Unknown",
+                        tokenUsage: tokenUsage,
+                        guidedGenerationResult: nil
+                    )
+                    switch specialResult {
+                    case .resignation(let winner):
+                        return (.resignation(winner: winner), penalties, retries, activityLog)
+                    default:
+                        return (.drawClaim(specialResult), penalties, retries, activityLog)
+                    }
+                }
+
                 lastActivityLog = AIActivityLog(
                     systemPrompt: systemMessage,
                     userPrompt: userMessage,
@@ -430,7 +465,7 @@ final class AIService {
                 print("[AIService] Penalties: \(penalties.count), Retries: \(retries)")
                 print("[AIService] ====== END REQUEST ======")
 
-                return (annotatedMove, penalties, retries, lastActivityLog)
+                return (.move(annotatedMove), penalties, retries, lastActivityLog)
 
             } catch {
                 let label = error is AIError ? "AI error" : "Network error"
@@ -630,9 +665,40 @@ final class AIService {
         }
     }
 
+    /// Checks if the AI response indicates a resignation or draw claim.
+    /// Returns the game result if so, nil if it's a normal move.
+    static func detectSpecialAction(_ text: String, color: PieceColor) -> GameResult? {
+        let lower = text.lowercased()
+
+        // Resignation: "0-1 {white resigns}" or "1-0 {black resigns}" or just "resign"
+        if lower.contains("resign") || lower.contains("0-1") || lower.contains("1-0") {
+            // The color playing is the one resigning
+            return .resignation(winner: color.opposite)
+        }
+
+        // Draw claims: "½–½" or "1/2-1/2"
+        if lower.contains("½–½") || lower.contains("½-½") || lower.contains("1/2-1/2") {
+            if lower.contains("50 move") || lower.contains("50-move") || lower.contains("75 move") || lower.contains("75-move") {
+                return .fiftyMoveRule
+            }
+            return .drawByAgreement
+        }
+
+        return nil
+    }
+
     /// Extracts a move from potentially noisy AI output.
     private func cleanMoveText(_ text: String) -> String {
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Strip comments: "e2e4 { capture knight }" → "e2e4"
+        if let braceRange = cleaned.range(of: "{") {
+            cleaned = String(cleaned[cleaned.startIndex..<braceRange.lowerBound])
+                .trimmingCharacters(in: .whitespaces)
+        }
+
+        // Normalize promotion format: "e7e8=q" → "e7e8q"
+        cleaned = cleaned.replacingOccurrences(of: "=", with: "")
 
         // If it's short and looks like a move, use it directly
         if cleaned.count <= 6 {
@@ -669,6 +735,13 @@ enum AIConstants {
 }
 
 // MARK: - AI Service Failure
+
+/// The result of an AI move request — either a chess move or a game-ending action.
+enum AIMoveResult: Sendable {
+    case move(ChessMove)
+    case resignation(winner: PieceColor)
+    case drawClaim(GameResult)
+}
 
 /// Wraps the underlying error along with all accumulated retry state so the caller
 /// can display penalties, retry counts, and the last activity log even when the service fails.
