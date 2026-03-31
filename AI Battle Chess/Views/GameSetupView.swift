@@ -138,6 +138,32 @@ struct GameSetupView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: aiSelection.wrappedValue) { _, newSelection in
+            if let selection = newSelection {
+                playerName.wrappedValue = aiDisplayName(for: selection)
+            }
+        }
+        .onChange(of: isAI.wrappedValue) { _, nowAI in
+            if !nowAI {
+                playerName.wrappedValue = "Player"
+            } else if let selection = aiSelection.wrappedValue {
+                playerName.wrappedValue = aiDisplayName(for: selection)
+            } else {
+                playerName.wrappedValue = "AI Opponent"
+            }
+        }
+    }
+
+    private func aiDisplayName(for selection: AISelection) -> String {
+        switch selection {
+        case .appleIntelligence:
+            return "Apple Intelligence"
+        case .llmConfig(let configID):
+            if let config = engine.llmKit.configurations.first(where: { $0.id == configID }) {
+                return config.name
+            }
+            return "AI Opponent"
+        }
     }
 
     // MARK: - Hierarchical AI Model Picker
@@ -153,7 +179,7 @@ struct GameSetupView: View {
 
                 if appleIntelligenceAvailable {
                     Section("Apple Intelligence") {
-                        Text("On-Device Model").tag(AISelection.appleIntelligence as AISelection?)
+                        Text("Apple Intelligence").tag(AISelection.appleIntelligence as AISelection?)
                     }
                 }
 

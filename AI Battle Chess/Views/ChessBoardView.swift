@@ -20,17 +20,12 @@ struct ChessBoardView: View {
                 // File labels spacer
                 Color.clear.frame(width: 20, height: 0)
 
-                // Board
-                VStack(spacing: 0) {
-                    ForEach((0..<8).reversed(), id: \.self) { rank in
-                        HStack(spacing: 0) {
-                            ForEach(0..<8, id: \.self) { file in
-                                squareView(file: file, rank: rank)
-                            }
-                        }
+                // Board with animated piece overlay
+                boardGrid
+                    .border(Color.primary.opacity(0.3), width: 1)
+                    .overlay {
+                        animatedPieceOverlay
                     }
-                }
-                .border(Color.primary.opacity(0.3), width: 1)
 
                 // Rank numbers on right
                 VStack(spacing: 0) {
@@ -62,6 +57,46 @@ struct ChessBoardView: View {
         }
     }
 
+    // MARK: - Board Grid
+
+    private var boardGrid: some View {
+        VStack(spacing: 0) {
+            ForEach((0..<8).reversed(), id: \.self) { rank in
+                HStack(spacing: 0) {
+                    ForEach(0..<8, id: \.self) { file in
+                        squareView(file: file, rank: rank)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Animated Piece Overlay
+
+    /// Renders the moving piece as an overlay on top of the entire board,
+    /// so it can travel across square boundaries without being clipped.
+    @ViewBuilder
+    private var animatedPieceOverlay: some View {
+        if let animating = engine.animatingMove,
+           let piece = engine.displayBoard.piece(at: animating.to) {
+            let boardWidth = squareSize * 8
+            let boardHeight = squareSize * 8
+
+            // Position of the destination square center (board origin is top-left)
+            let destX = (CGFloat(animating.to.file) + 0.5) * squareSize
+            let destY = (CGFloat(7 - animating.to.rank) + 0.5) * squareSize
+
+            // Offset from destination back toward source
+            let offsetX = CGFloat(engine.animatingFileDelta) * squareSize
+            let offsetY = -CGFloat(engine.animatingRankDelta) * squareSize
+
+            PieceView(piece: piece, size: squareSize)
+                .position(x: destX + offsetX, y: destY + offsetY)
+                .frame(width: boardWidth, height: boardHeight)
+                .allowsHitTesting(false)
+        }
+    }
+
     // MARK: - Square View
 
     @ViewBuilder
@@ -76,6 +111,10 @@ struct ChessBoardView: View {
         let isLastMoveFrom = engine.lastMove?.from == position && !engine.isViewingHistory
         let isLastMoveTo = engine.lastMove?.to == position && !engine.isViewingHistory
         let isKingInCheck = isKingInCheckAt(position, on: displayBoard)
+
+        // Hide the piece at the destination during animation (it's rendered in the overlay)
+        let isAnimatingTo = engine.animatingMove?.to == position && engine.animatingMove != nil
+        let isAnimatingFrom = engine.animatingMove?.from == position && engine.animatingMove != nil
 
         ZStack {
             // Base square color
@@ -107,26 +146,9 @@ struct ChessBoardView: View {
                 }
             }
 
-            // Piece rendering with animation
-            if let piece {
-                if let animating = engine.animatingMove {
-                    if animating.to == position {
-                        // Piece being animated TO this square — offset from source
-                        PieceView(piece: piece, size: squareSize)
-                            .offset(
-                                x: CGFloat(engine.animatingFileDelta) * squareSize,
-                                y: -CGFloat(engine.animatingRankDelta) * squareSize
-                            )
-                            .zIndex(10)
-                    } else if animating.from == position {
-                        // Source square during animation — empty
-                        EmptyView()
-                    } else {
-                        PieceView(piece: piece, size: squareSize)
-                    }
-                } else {
-                    PieceView(piece: piece, size: squareSize)
-                }
+            // Piece rendering — skip animated piece (rendered in overlay)
+            if let piece, !isAnimatingTo, !isAnimatingFrom {
+                PieceView(piece: piece, size: squareSize)
             }
         }
         .frame(width: squareSize, height: squareSize)
