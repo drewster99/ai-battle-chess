@@ -198,9 +198,9 @@ struct ContentView: View {
             if halfMoveClock > 0 {
                 Divider().frame(height: 14)
                 let movePairs = halfMoveClock / 2
-                Text("50-move: \(movePairs)/75")
+                Text("50-move: \(movePairs)/50")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(halfMoveClock >= 100 ? .orange : .secondary)
+                    .foregroundStyle(movePairs >= 40 ? .orange : .secondary)
             }
 
             Spacer()

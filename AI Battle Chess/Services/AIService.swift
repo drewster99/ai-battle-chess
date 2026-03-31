@@ -154,10 +154,8 @@ final class AIService {
             - Move from b2 to a1 (capturing) and promoting to Knight: b2a1n
         
         5. **50 Move Rule**
-        - If 50 consecutive turns by each player (100 total moves) happen without the movement
-        of any pawns and without any pieces being captured, either player, on any subsequent
-        move can claim a 50-move draw by indicating "½–½ {50 move rule}" as their move, but *it is not required*.
-        - If 75 consecutive turns by each player (150 total moves) happen without movement of any pawns and without any pieces being captured, the game terminates in an automatic draw, indicated as "½–½ {75 move rule}"
+        - If 50 consecutive turns by each player (100 total moves, which are called 'half moves') happen without the movement
+        of any pawns and without any pieces being captured, the nextmove will automatically be indicated as a draw by, like this: "½–½ {50 move rule}" as their move.
         
         6. **Winning the Game:**
         - **Checkmate:** The king is in check and cannot escape capture.
@@ -210,14 +208,10 @@ final class AIService {
             prompt += "WARNING: Your king is in CHECK! You must resolve the check.\n"
         }
 
-        // 50/75-move rule counter
+        // 50-move rule counter
         if board.halfMoveClock > 0 {
             let fullMoves = board.halfMoveClock / 2
-            prompt += "\n50-move rule: \(fullMoves) consecutive move pairs without a pawn move or capture."
-            if board.halfMoveClock >= 100 {
-                prompt += " (Draw claim available.)"
-            }
-            prompt += "\n"
+            prompt += "\n50-move rule: \(fullMoves)/50 consecutive move pairs without a pawn move or capture.\n"
         }
 
         // Legal moves list — the AI MUST pick one of these
