@@ -37,6 +37,13 @@ struct AIBattleChessApp: App {
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1600, height: 900)
+
+        WindowGroup("AI Move Detail", for: AIActivityDetail.self) { $detail in
+            if let detail {
+                AIActivityDetailView(detail: detail)
+            }
+        }
+        .defaultSize(width: 650, height: 600)
     }
 }
 

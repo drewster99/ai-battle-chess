@@ -138,6 +138,7 @@ struct ChessMove: Equatable, Sendable, Codable, Identifiable {
     let isCheck: Bool
     let isCheckmate: Bool
     let comment: String?
+    let thinking: String?
 
     init(
         piece: ChessPiece,
@@ -151,6 +152,7 @@ struct ChessMove: Equatable, Sendable, Codable, Identifiable {
         isCheck: Bool = false,
         isCheckmate: Bool = false,
         comment: String? = nil,
+        thinking: String? = nil,
         id: UUID = UUID()
     ) {
         self.id = id
@@ -165,10 +167,11 @@ struct ChessMove: Equatable, Sendable, Codable, Identifiable {
         self.isCheck = isCheck
         self.isCheckmate = isCheckmate
         self.comment = comment
+        self.thinking = thinking
     }
 
-    /// Returns a copy with check/checkmate flags and optional comment updated.
-    func withCheckStatus(isCheck: Bool, isCheckmate: Bool, comment: String? = nil) -> ChessMove {
+    /// Returns a copy with check/checkmate flags and optional comment/thinking updated.
+    func withCheckStatus(isCheck: Bool, isCheckmate: Bool, comment: String? = nil, thinking: String? = nil) -> ChessMove {
         ChessMove(
             piece: piece,
             from: from,
@@ -181,6 +184,7 @@ struct ChessMove: Equatable, Sendable, Codable, Identifiable {
             isCheck: isCheck,
             isCheckmate: isCheckmate,
             comment: comment ?? self.comment,
+            thinking: thinking ?? self.thinking,
             id: id
         )
     }
@@ -272,6 +276,7 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
     var useAppleIntelligence: Bool
     var color: PieceColor
     var humanPlayerID: UUID?  // References HumanPlayer.id for human players
+    var allowResign: Bool
 
     init(
         name: String = "Player",
@@ -280,6 +285,7 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
         useAppleIntelligence: Bool = false,
         color: PieceColor = .white,
         humanPlayerID: UUID? = nil,
+        allowResign: Bool = true,
         id: UUID = UUID()
     ) {
         self.id = id
@@ -289,6 +295,7 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
         self.useAppleIntelligence = useAppleIntelligence
         self.color = color
         self.humanPlayerID = humanPlayerID
+        self.allowResign = allowResign
     }
 }
 
@@ -386,7 +393,7 @@ struct AIActivityLog: Sendable, Equatable {
 // MARK: - Token Usage
 
 /// Token counts from an LLM API response.
-struct TokenUsage: Codable, Sendable, Equatable {
+struct TokenUsage: Codable, Sendable, Equatable, Hashable {
     let inputTokens: Int?
     let outputTokens: Int?
     let totalTokens: Int?

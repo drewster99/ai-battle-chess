@@ -20,6 +20,13 @@ final class AIService {
     // MARK: - System Prompt
 
     static func systemPrompt(for color: PieceColor, isAppleIntelligence: Bool = false, board: ChessBoard? = nil) -> String {
+        // Apple Intelligence uses a concise, focused prompt optimized for on-device models.
+        // Per Apple's guidance: keep prompts short, use step-by-step instructions,
+        // provide few-shot examples, and reduce the reasoning burden on the model.
+        if isAppleIntelligence {
+            return appleIntelligenceSystemPrompt(for: color)
+        }
+
         let yourPieces: String
         let theirPieces: String
         if color == .white {
@@ -77,7 +84,8 @@ final class AIService {
 
         return """
         # You are playing chess as \(color.displayName).
-
+        You must win the game.
+        
         ## Playing Chess
         Here's a basic overview of how to play:
 
@@ -190,7 +198,41 @@ final class AIService {
         """
     }
 
-    static func boardStatePrompt(board: ChessBoard, positionRepetitionCount: Int = 1) -> String {
+    // MARK: - Apple Intelligence System Prompt
+
+    /// Concise system prompt optimized for Apple's on-device foundation model.
+    /// Follows Apple's prompting guidelines: short, step-by-step, with few-shot examples.
+    private static func appleIntelligenceSystemPrompt(for color: PieceColor) -> String {
+        let colorName = color.displayName
+        let pieceCase = color == .white ? "uppercase (K Q R B N P)" : "lowercase (k q r b n p)"
+
+        return """
+        You are a chess player playing as \(colorName). Your pieces are \(pieceCase). Pick the best move from the VALID MOVES list.
+
+        Steps:
+        1. Look at the board to understand the position.
+        2. Find the best move from the VALID MOVES list.
+        3. Explain your choice in thinkingLogic.
+        4. Put the exact move text in move. Copy it exactly from the VALID MOVES list.
+
+        Example 1:
+        VALID MOVES: e2e3, e2e4, d2d4, g1f3, b1c3
+        thinkingLogic: "e2e4 controls the center"
+        move: e2e4
+
+        Example 2:
+        VALID MOVES: e8d8, g7g6, f8e7
+        thinkingLogic: "King is unsafe, develop bishop with f8e7"
+        move: f8e7
+        """
+    }
+
+    static func boardStatePrompt(
+        board: ChessBoard,
+        positionRepetitionCount: Int = 1,
+        positionCounts: [ChessBoard.PositionKey: Int] = [:],
+        allowResign: Bool = true
+    ) -> String {
         var prompt = ""
 
         // ASCII board
@@ -212,23 +254,48 @@ final class AIService {
             prompt += "WARNING: Your king is in CHECK! You must resolve the check.\n"
         }
 
-        // 50-move rule counter
-        if board.halfMoveClock > 0 {
-            prompt += "\n50-move rule: \(board.halfMoveClock)/100 half-moves without a pawn move or capture.\n"
-        }
-
-        // Threefold repetition counter
-        if positionRepetitionCount > 1 {
-            prompt += "\nThreefold repetition: This position has occurred \(positionRepetitionCount)/3 times. At 3, the game is automatically drawn.\n"
-        }
-
         // Legal moves list — the AI MUST pick one of these
-        var moveStrings = legalMovesStringList(for: board)
-        // Resign is always available
-        let resignNotation = board.activeColor == .white ? "0-1" : "1-0"
-        moveStrings.append(resignNotation)
+        let legalMoves = MoveValidator.allLegalMoves(for: board)
+        var moveStrings = legalMoves.map { move -> String in
+            var s = "\(move.from)\(move.to)"
+            if let promo = move.promotionType {
+                s += promo.notation.lowercased()
+            }
+            return s
+        }
+        if allowResign {
+            let resignNotation = board.activeColor == .white ? "0-1" : "1-0"
+            moveStrings.append(resignNotation)
+        }
         prompt += "\nVALID MOVES: \(moveStrings.joined(separator: ", "))\n"
         prompt += "Respond with exactly one move from this list.\n"
+
+        // Threefold repetition: warn about specific moves that would trigger a draw
+        if !positionCounts.isEmpty {
+            var dangerousMoves: [String] = []
+            for move in legalMoves {
+                let resultBoard = board.applyingMove(move)
+                let key = resultBoard.positionKey
+                if (positionCounts[key] ?? 0) >= 2 {
+                    dangerousMoves.append("\(move.from)\(move.to)")
+                }
+            }
+            if !dangerousMoves.isEmpty {
+                for moveStr in dangerousMoves {
+                    prompt += "CRITICAL: DO NOT RESPOND WITH MOVE '\(moveStr)' OR YOU WILL LOSE THE GAME.\n"
+                }
+            }
+        }
+
+        // 50-move rule: warn when approaching the limit
+        if board.halfMoveClock >= 80 {
+            let movesRemaining = (100 - board.halfMoveClock) / 2
+            if movesRemaining <= 0 {
+                prompt += "CRITICAL: YOU MUST CAPTURE A PIECE OR MOVE A PAWN ON THIS MOVE OR YOU WILL LOSE THE GAME.\n"
+            } else {
+                prompt += "WARNING: If a piece is not captured or a pawn is not moved within \(movesRemaining) \(movesRemaining == 1 ? "move" : "moves"), the game will end unfavorably due to the 50-move rule.\n"
+            }
+        }
 
         return prompt
     }
@@ -293,10 +360,13 @@ final class AIService {
         color: PieceColor,
         gameID: UUID,
         gameTurnIndex: Int,
-        positionRepetitionCount: Int = 1
+        positionRepetitionCount: Int = 1,
+        positionCounts: [ChessBoard.PositionKey: Int] = [:],
+        allowResign: Bool = true
     ) async throws -> (result: AIMoveResult, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
         var penalties: [AIPenalty] = []
         var retries = 0
+        var consecutiveErrors = 0
         var lastActivityLog: AIActivityLog? = nil
         var attempts: [AITurnAttempt] = []
 
@@ -307,7 +377,7 @@ final class AIService {
         let modelLabel = config?.name ?? providerModel
 
         let systemMessage = AIService.systemPrompt(for: color, board: board)
-        let userMessage = AIService.boardStatePrompt(board: board, positionRepetitionCount: positionRepetitionCount)
+        let userMessage = AIService.boardStatePrompt(board: board, positionRepetitionCount: positionRepetitionCount, positionCounts: positionCounts, allowResign: allowResign)
 
         print("[AIService] ====== REQUEST ======")
         print("[AIService] \(modelLabel) | \(color.displayName) | Turn \(gameTurnIndex) | Game \(gameID.uuidString.prefix(8))")
@@ -377,23 +447,44 @@ final class AIService {
                 guard let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode) else {
                     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-                    print("[AIService] HTTP \(statusCode) error")
+                    let responseBody = String(data: data, encoding: .utf8) ?? "(binary data)"
+                    print("[AIService] HTTP \(statusCode) error — response body:\n\(responseBody)")
                     throw AIError.httpError(statusCode: statusCode)
                 }
+
+                consecutiveErrors = 0
 
                 let extracted = try extractMoveText(from: data, providerType: preparedRequest.providerType)
                 let moveText = extracted.move
                 let moveComment = extracted.comment
+                let moveThinking = extracted.thinking
                 let tokenUsage = extractTokenUsage(from: data, providerType: preparedRequest.providerType)
                 let rawResponseText = String(data: data, encoding: .utf8) ?? "(binary data)"
 
                 print("[AIService] Response move: \"\(moveText)\" comment: \"\(moveComment ?? "(none)")\"")
+                if let moveThinking {
+                    print("[AIService] Thinking: \(moveThinking.prefix(200))...")
+                }
 
                 // Check for resignation or draw claim before parsing as a move
                 if let specialResult = AIService.detectSpecialAction(moveText, color: color) {
+                    // Block resignation if not allowed
+                    if !allowResign, case .resignation = specialResult {
+                        let reason = "resignation is not allowed"
+                        let correction = AIService.correctionPrompt(badMove: moveText, reason: reason, board: board)
+                        print("[AIService] BLOCKED RESIGNATION — sending correction")
+                        attempts.append(AITurnAttempt(thinking: moveThinking, moveText: moveText, comment: moveComment, isValid: false, errorMessage: reason))
+                        lastActivityLog?.attempts = attempts
+                        conversationMessages.append(ConversationMessage(role: .assistant, content: moveText))
+                        conversationMessages.append(ConversationMessage(role: .user, content: correction))
+                        penalties.append(AIPenalty(reason: "Blocked resignation (attempt \(attempt + 1))", severity: .warning, timestamp: Date()))
+                        retries += 1
+                        turnsSinceReset += 1
+                        continue
+                    }
                     print("[AIService] SPECIAL ACTION detected: \(specialResult)")
                     print("[AIService] ====== END REQUEST ======")
-                    attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: true, errorMessage: nil))
+                    attempts.append(AITurnAttempt(thinking: moveThinking, moveText: moveText, comment: moveComment, isValid: true, errorMessage: nil))
                     let activityLog = AIActivityLog(
                         systemPrompt: systemMessage,
                         userPrompt: userMessage,
@@ -435,7 +526,7 @@ final class AIService {
                     let correction = AIService.correctionPrompt(badMove: moveText, reason: reason, board: board)
                     print("[AIService] PARSE FAILURE: \"\(moveText)\" — sending correction")
 
-                    attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: false, errorMessage: reason))
+                    attempts.append(AITurnAttempt(thinking: moveThinking, moveText: moveText, comment: moveComment, isValid: false, errorMessage: reason))
                     lastActivityLog?.attempts = attempts
                     conversationMessages.append(ConversationMessage(role: .assistant, content: moveText))
                     conversationMessages.append(ConversationMessage(role: .user, content: correction))
@@ -457,7 +548,7 @@ final class AIService {
                     let correction = AIService.correctionPrompt(badMove: moveText, reason: reason, board: board)
                     print("[AIService] ILLEGAL MOVE: \"\(moveText)\" (\(parsed.from)->\(parsed.to)) — sending correction")
 
-                    attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: false, errorMessage: reason))
+                    attempts.append(AITurnAttempt(thinking: moveThinking, moveText: moveText, comment: moveComment, isValid: false, errorMessage: reason))
                     lastActivityLog?.attempts = attempts
                     conversationMessages.append(ConversationMessage(role: .assistant, content: moveText))
                     conversationMessages.append(ConversationMessage(role: .user, content: correction))
@@ -472,9 +563,9 @@ final class AIService {
                 let newBoard = board.applyingMove(legalMove)
                 let isCheck = MoveValidator.isKingInCheck(color: board.activeColor.opposite, on: newBoard)
                 let isCheckmate = isCheck && MoveValidator.isCheckmate(on: newBoard)
-                let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate, comment: moveComment)
+                let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate, comment: moveComment, thinking: moveThinking)
 
-                attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: true, errorMessage: nil))
+                attempts.append(AITurnAttempt(thinking: moveThinking, moveText: moveText, comment: moveComment, isValid: true, errorMessage: nil))
                 lastActivityLog?.attempts = attempts
 
                 print("[AIService] SUCCESS: \(legalMove.from)\(legalMove.to) (check=\(isCheck), checkmate=\(isCheckmate))")
@@ -509,11 +600,34 @@ final class AIService {
                 )
                 penalties.append(penalty)
                 retries += 1
+                consecutiveErrors += 1
                 if attempt >= AIService.maxRetries - 1 {
                     print("[AIService] FATAL: All \(AIService.maxRetries) attempts failed")
                     print("[AIService] ====== END REQUEST (FAILURE) ======")
                     throw AIServiceFailure(
                         underlyingError: error,
+                        penalties: penalties,
+                        retries: retries,
+                        lastActivityLog: lastActivityLog
+                    )
+                }
+
+                // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s max
+                guard !Task.isCancelled else {
+                    throw AIServiceFailure(
+                        underlyingError: CancellationError(),
+                        penalties: penalties,
+                        retries: retries,
+                        lastActivityLog: lastActivityLog
+                    )
+                }
+                let delay = min(pow(2.0, Double(consecutiveErrors - 1)), 60.0)
+                print("[AIService] Backing off \(String(format: "%.0f", delay))s before retry...")
+                do {
+                    try await Task.sleep(for: .seconds(delay))
+                } catch {
+                    throw AIServiceFailure(
+                        underlyingError: CancellationError(),
                         penalties: penalties,
                         retries: retries,
                         lastActivityLog: lastActivityLog
@@ -558,6 +672,14 @@ final class AIService {
             body["system"] = systemMessage
             body["messages"] = apiMessages
         case .gemini:
+            // Gemini API uses a different body structure than OpenAI-compatible providers.
+            // Remove top-level fields that Gemini doesn't recognize — SwiftLLMKit's
+            // prepareRequest() puts temperature/stream at the top level for all providers
+            // but Gemini expects temperature inside generationConfig (already set by the kit).
+            body.removeValue(forKey: "stream")
+            body.removeValue(forKey: "temperature")
+            body.removeValue(forKey: "model")
+
             // Gemini: prepend system to first user message, map roles
             var contents: [[String: Any]] = []
             var injectedSystem = false
@@ -582,7 +704,7 @@ final class AIService {
 
     // MARK: - Response Parsing
 
-    private func extractMoveText(from data: Data, providerType: ProviderType) throws -> (move: String, comment: String?) {
+    private func extractMoveText(from data: Data, providerType: ProviderType) throws -> (move: String, comment: String?, thinking: String?) {
         let jsonObject: Any
         do {
             jsonObject = try JSONSerialization.jsonObject(with: data)
@@ -594,6 +716,7 @@ final class AIService {
         }
 
         let text: String?
+        var thinking: String? = nil
 
         switch providerType {
         case .anthropic:
@@ -601,6 +724,9 @@ final class AIService {
                 // Find the text block — skip thinking blocks from extended thinking mode
                 let textBlock = content.first(where: { ($0["type"] as? String) == "text" })
                 text = textBlock?["text"] as? String
+                // Extract thinking from extended thinking mode
+                let thinkingBlock = content.first(where: { ($0["type"] as? String) == "thinking" })
+                thinking = thinkingBlock?["thinking"] as? String
             } else {
                 text = nil
             }
@@ -630,11 +756,14 @@ final class AIService {
                 text = nil
             }
         default:
+            // OpenAI-compatible format (also used by DeepSeek, etc.)
             if let choices = json["choices"] as? [[String: Any]],
                let first = choices.first,
                let message = first["message"] as? [String: Any],
                let content = message["content"] as? String {
                 text = content
+                // DeepSeek and compatible providers put reasoning in reasoning_content
+                thinking = message["reasoning_content"] as? String
             } else {
                 text = nil
             }
@@ -644,7 +773,8 @@ final class AIService {
             throw AIError.invalidResponse("Empty or missing move text in response")
         }
 
-        return cleanMoveText(moveText)
+        let cleaned = cleanMoveText(moveText)
+        return (cleaned.move, cleaned.comment, thinking)
     }
 
     // MARK: - Token Usage Extraction

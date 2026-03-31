@@ -20,6 +20,8 @@ struct GameSetupView: View {
     @State private var newPlayerName: String = ""
     @State private var addingPlayerForColor: PieceColor? = nil
     @State private var pgnText: String = ""
+    @State private var whiteAllowResign: Bool = true
+    @State private var blackAllowResign: Bool = true
 
     private var configurations: [ModelConfiguration] {
         engine.llmKit.configurations.filter(\.isValid)
@@ -59,7 +61,8 @@ struct GameSetupView: View {
                     playerName: $whitePlayerName,
                     isAI: $whiteIsAI,
                     aiSelection: $whiteAISelection,
-                    humanPlayerID: $whiteHumanPlayerID
+                    humanPlayerID: $whiteHumanPlayerID,
+                    allowResign: $whiteAllowResign
                 )
 
                 Divider()
@@ -71,7 +74,8 @@ struct GameSetupView: View {
                     playerName: $blackPlayerName,
                     isAI: $blackIsAI,
                     aiSelection: $blackAISelection,
-                    humanPlayerID: $blackHumanPlayerID
+                    humanPlayerID: $blackHumanPlayerID,
+                    allowResign: $blackAllowResign
                 )
             }
 
@@ -139,7 +143,8 @@ struct GameSetupView: View {
         playerName: Binding<String>,
         isAI: Binding<Bool>,
         aiSelection: Binding<AISelection?>,
-        humanPlayerID: Binding<UUID>
+        humanPlayerID: Binding<UUID>,
+        allowResign: Binding<Bool>
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -163,6 +168,8 @@ struct GameSetupView: View {
                 TextField("Player Name", text: playerName)
                     .textFieldStyle(.roundedBorder)
                 aiModelPicker(selection: aiSelection)
+                Toggle("Allow resignation", isOn: allowResign)
+                    .font(.caption)
             } else {
                 humanPlayerPicker(
                     selectedPlayerID: humanPlayerID,
@@ -338,7 +345,8 @@ struct GameSetupView: View {
             isAI: whiteIsAI,
             aiSelection: whiteAISelection,
             color: .white,
-            humanPlayerID: whiteHumanPlayerID
+            humanPlayerID: whiteHumanPlayerID,
+            allowResign: whiteAllowResign
         )
 
         // Build black player config
@@ -347,7 +355,8 @@ struct GameSetupView: View {
             isAI: blackIsAI,
             aiSelection: blackAISelection,
             color: .black,
-            humanPlayerID: blackHumanPlayerID
+            humanPlayerID: blackHumanPlayerID,
+            allowResign: blackAllowResign
         )
 
         engine.whitePlayer = whiteConfig
@@ -367,8 +376,8 @@ struct GameSetupView: View {
         dismiss()
     }
 
-    private func buildPlayerConfig(name: String, isAI: Bool, aiSelection: AISelection?, color: PieceColor, humanPlayerID: UUID?) -> PlayerConfig {
-        var config = PlayerConfig(name: name, isAI: isAI, color: color, humanPlayerID: isAI ? nil : humanPlayerID)
+    private func buildPlayerConfig(name: String, isAI: Bool, aiSelection: AISelection?, color: PieceColor, humanPlayerID: UUID?, allowResign: Bool = true) -> PlayerConfig {
+        var config = PlayerConfig(name: name, isAI: isAI, color: color, humanPlayerID: isAI ? nil : humanPlayerID, allowResign: allowResign)
         if isAI, let selection = aiSelection {
             switch selection {
             case .appleIntelligence:
@@ -389,6 +398,7 @@ struct GameSetupView: View {
         let humanPlayerID: String
         let isAppleIntelligence: Bool
         let aiConfigID: String?
+        var allowResign: Bool?  // Optional for backward compatibility with saved data
     }
 
     private static let lastWhiteKey = "lastSetup.white"
@@ -403,7 +413,8 @@ struct GameSetupView: View {
             aiConfigID: whiteAISelection.flatMap { selection -> String? in
                 if case .llmConfig(let id) = selection { return id.uuidString }
                 return nil
-            }
+            },
+            allowResign: whiteAllowResign
         )
         let blackSide = SavedSideSetup(
             isAI: blackIsAI,
@@ -413,7 +424,8 @@ struct GameSetupView: View {
             aiConfigID: blackAISelection.flatMap { selection -> String? in
                 if case .llmConfig(let id) = selection { return id.uuidString }
                 return nil
-            }
+            },
+            allowResign: blackAllowResign
         )
 
         do {
@@ -434,7 +446,8 @@ struct GameSetupView: View {
             do {
                 let saved = try decoder.decode(SavedSideSetup.self, from: whiteData)
                 applySavedSetup(saved, isAI: &whiteIsAI, playerName: &whitePlayerName,
-                                humanPlayerID: &whiteHumanPlayerID, aiSelection: &whiteAISelection)
+                                humanPlayerID: &whiteHumanPlayerID, aiSelection: &whiteAISelection,
+                                allowResign: &whiteAllowResign)
             } catch {
                 print("[GameSetupView] Failed to decode white setup: \(error)")
             }
@@ -444,7 +457,8 @@ struct GameSetupView: View {
             do {
                 let saved = try decoder.decode(SavedSideSetup.self, from: blackData)
                 applySavedSetup(saved, isAI: &blackIsAI, playerName: &blackPlayerName,
-                                humanPlayerID: &blackHumanPlayerID, aiSelection: &blackAISelection)
+                                humanPlayerID: &blackHumanPlayerID, aiSelection: &blackAISelection,
+                                allowResign: &blackAllowResign)
             } catch {
                 print("[GameSetupView] Failed to decode black setup: \(error)")
             }
@@ -456,8 +470,10 @@ struct GameSetupView: View {
         isAI: inout Bool,
         playerName: inout String,
         humanPlayerID: inout UUID,
-        aiSelection: inout AISelection?
+        aiSelection: inout AISelection?,
+        allowResign: inout Bool
     ) {
+        allowResign = saved.allowResign ?? true
         isAI = saved.isAI
 
         if saved.isAI {

@@ -7,6 +7,7 @@ import SwiftLLMKit
 struct PlayerPanelView: View {
     @Bindable var engine: GameEngine
     let color: PieceColor
+    @Environment(\.openWindow) private var openWindow
 
     private var player: PlayerConfig {
         color == .white ? engine.whitePlayer : engine.blackPlayer
@@ -28,13 +29,26 @@ struct PlayerPanelView: View {
         materialValue - opponentMaterial
     }
 
+    private var totalTime: TimeInterval {
+        (engine.statistics.perMoveDuration[color] ?? []).reduce(0, +)
+    }
+
+    private var aiConfig: ModelConfiguration? {
+        guard let configID = player.aiConfigurationID else { return nil }
+        return engine.llmKit.configurations.first(where: { $0.id == configID })
+    }
+
+    private var aiProvider: ModelProvider? {
+        guard let config = aiConfig else { return nil }
+        return engine.llmKit.providers.first(where: { $0.id == config.providerID })
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                // Player header
+        VStack(alignment: .leading, spacing: 0) {
+            // Fixed header (does not scroll)
+            VStack(alignment: .leading, spacing: 10) {
                 playerHeader
 
-                // Resign button (human players only)
                 if !player.isAI && engine.isGameActive {
                     Button("Resign") {
                         engine.resign(color: color)
@@ -44,29 +58,27 @@ struct PlayerPanelView: View {
                     .tint(.red)
                     .controlSize(.small)
                 }
-
-                Divider()
-
-                // Captured pieces
-                capturedPiecesView
-
-                Divider()
-
-                // Statistics
-                statisticsView
-
-                // AI Status (if AI player)
-                if player.isAI {
-                    Divider()
-                    aiStatusView
-
-                    Divider()
-                    aiActivitySection
-                }
-
-                Spacer()
             }
-            .padding(12)
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            Divider()
+
+            // Scrollable content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    statsCard
+
+                    if player.isAI {
+                        Divider()
+                        aiActivitySection
+                    }
+
+                    Spacer()
+                }
+                .padding(10)
+            }
         }
         .background(
             RoundedRectangle(cornerRadius: 12)
@@ -89,8 +101,8 @@ struct PlayerPanelView: View {
 
     private var playerHeader: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // Name + type badge
             HStack(spacing: 8) {
-                // Color indicator
                 Circle()
                     .fill(color == .white ? Color.white : Color.black)
                     .frame(width: 24, height: 24)
@@ -98,76 +110,141 @@ struct PlayerPanelView: View {
                         Circle().strokeBorder(Color.gray, lineWidth: 1)
                     )
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(player.name)
-                        .font(.headline)
-                        .lineLimit(1)
+                Text(player.name)
+                    .font(.headline)
+                    .lineLimit(1)
 
-                    HStack(spacing: 4) {
-                        if player.isAI {
-                            if player.useAppleIntelligence {
-                                Label("Apple Intelligence", systemImage: "apple.intelligence")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else if let configID = player.aiConfigurationID,
-                                      let config = engine.llmKit.configurations.first(where: { $0.id == configID }) {
-                                Label(config.name, systemImage: "cpu")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Label("AI", systemImage: "cpu")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } else {
-                            Label("Human", systemImage: "person.fill")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
+                Text(player.isAI ? "[AI]" : "[Human]")
+                    .font(.caption.bold())
+                    .foregroundStyle(player.isAI ? .blue : .green)
 
                 Spacer()
 
-                if isCurrentTurn && engine.isGameActive {
-                    if engine.isAIThinking && engine.currentAIColor == color {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "arrowtriangle.right.fill")
-                            .foregroundStyle(Color.accentColor)
-                            .font(.caption)
+                ZStack {
+                    // Reserve consistent space
+                    ProgressView()
+                        .controlSize(.small)
+                        .hidden()
+
+                    if isCurrentTurn && engine.isGameActive {
+                        if engine.isAIThinking && engine.currentAIColor == color {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrowtriangle.right.fill")
+                                .foregroundStyle(Color.accentColor)
+                                .font(.caption)
+                        }
                     }
                 }
             }
 
-            // Player stats row
+            // AI model config details
+            if player.isAI {
+                aiConfigDetails
+            }
+
+            // Stats row
             playerStatsRow
+        }
+    }
+
+    // MARK: - AI Config Details
+
+    @ViewBuilder
+    private var aiConfigDetails: some View {
+        if player.useAppleIntelligence {
+            Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 2) {
+                configRow(label: "Model", value: "Apple Intelligence (on-device)")
+                configRow(label: "Resign", value: player.allowResign ? "Allowed" : "Not allowed")
+            }
+            .font(.caption2)
+        } else if let config = aiConfig {
+            Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 2) {
+                if let provider = aiProvider {
+                    configRow(label: "Provider", value: provider.name)
+                }
+                configRow(label: "Model", value: config.modelID)
+                configRow(label: "Temp", value: String(format: "%.1f", config.temperature))
+                configRow(label: "Max tokens", value: "\(config.maxOutputTokens)")
+                configRow(label: "Context", value: "\(config.maxContextTokens)")
+                if let budget = config.thinkingBudget {
+                    configRow(label: "Thinking", value: "\(budget)")
+                }
+                configRow(label: "Resign", value: player.allowResign ? "Allowed" : "Not allowed")
+            }
+            .font(.caption2)
+        }
+    }
+
+    private func configRow(label: String, value: String) -> some View {
+        GridRow {
+            Text("\(label):")
+                .foregroundStyle(.tertiary)
+                .gridColumnAlignment(.trailing)
+            Text(value)
+                .foregroundStyle(.secondary)
+                .gridColumnAlignment(.leading)
         }
     }
 
     // MARK: - Player Stats Row
 
     private var playerStatsRow: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             let moves = engine.moveCount(for: color)
             Label("\(moves)", systemImage: "arrow.right")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .instantHelp("Moves played this game")
+
+            if totalTime > 0 {
+                Label(formatDuration(totalTime), systemImage: "timer")
+                    .instantHelp("Total time for all moves this game")
+            }
 
             let avgTime = engine.averageMoveTime(for: color)
             if avgTime > 0 {
                 Label(formatDuration(avgTime), systemImage: "clock")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .instantHelp("Average time per move")
             }
 
             let totalGames = engine.gameHistoryManager.totalGamesForPlayer(id: player.humanPlayerID, name: player.name) + (engine.isGameActive ? 1 : 0)
             Label("\(totalGames)", systemImage: "number")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .help("Total games played (includes current game)")
+                .instantHelp("Total games played (includes current game)")
         }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
+
+    // MARK: - Combined Stats Card
+
+    private var statsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            capturedPiecesView
+
+            let captures = engine.statistics.captureCount[color] ?? 0
+            let checks = engine.statistics.checkCount[color] ?? 0
+            let castled = engine.statistics.castled[color] ?? false
+            let promos = engine.statistics.promotions[color] ?? 0
+
+            HStack(spacing: 0) {
+                miniStat(value: "\(captures)", label: "Captures", color: captures > 0 ? .orange : .secondary)
+                miniStat(value: "\(checks)", label: "Checks", color: checks > 0 ? .red : .secondary)
+                miniStat(value: castled ? "Yes" : "---", label: "Castled", color: castled ? .blue : .secondary)
+                miniStat(value: "\(promos)", label: "Promos", color: promos > 0 ? .purple : .secondary)
+            }
+        }
+    }
+
+    private func miniStat(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 1) {
+            Text(value)
+                .font(.system(.caption, design: .rounded).bold())
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Captured Pieces
@@ -183,17 +260,22 @@ struct PlayerPanelView: View {
                     Text("+\(materialAdvantage)")
                         .font(.caption.bold())
                         .foregroundStyle(.green)
+                        .instantHelp("Material advantage (piece value points)")
+                } else if materialAdvantage < 0 {
+                    Text("\(materialAdvantage)")
+                        .font(.caption.bold())
+                        .foregroundStyle(.red)
+                        .instantHelp("Material disadvantage (piece value points)")
                 }
             }
 
-            // Show pieces captured BY this player (from move history)
             let captured = engine.capturedPieces(for: color.opposite)
             if captured.isEmpty {
                 Text("None")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(20)), count: 8), spacing: 2) {
+                HStack(spacing: 2) {
                     ForEach(Array(captured.enumerated()), id: \.offset) { _, type in
                         let piece = ChessPiece(color: color.opposite, type: type)
                         Image(piece.assetName)
@@ -207,54 +289,6 @@ struct PlayerPanelView: View {
         }
     }
 
-    // MARK: - Statistics
-
-    private var statisticsView: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Stats")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 4) {
-                GridRow {
-                    StatItem(label: "Captures", value: "\(engine.statistics.captureCount[color] ?? 0)")
-                    StatItem(label: "Checks", value: "\(engine.statistics.checkCount[color] ?? 0)")
-                }
-                GridRow {
-                    StatItem(label: "Castled", value: (engine.statistics.castled[color] ?? false) ? "Yes" : "---")
-                    StatItem(label: "Promos", value: "\(engine.statistics.promotions[color] ?? 0)")
-                }
-            }
-        }
-    }
-
-    // MARK: - AI Status
-
-    private var aiStatusView: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("AI Status")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            let penalties = engine.statistics.aiPenalties[color] ?? []
-            let retries = engine.statistics.aiRetryCount[color] ?? 0
-
-            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 4) {
-                GridRow {
-                    StatItem(label: "Retries", value: "\(retries)")
-                    StatItem(label: "Penalties", value: "\(penalties.count)")
-                }
-            }
-
-            if let lastPenalty = penalties.last {
-                Text(lastPenalty.reason)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .lineLimit(2)
-            }
-        }
-    }
-
     // MARK: - AI Activity Section
 
     @ViewBuilder
@@ -264,191 +298,172 @@ struct PlayerPanelView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            // Settings summary
-            aiSettingsSummary
-
-            // Token usage
-            if let activity = engine.currentAIActivity[color],
-               let tokens = activity.tokenUsage {
-                tokenUsageView(tokens)
-            }
-
-            // Attempts for current turn
-            if let activity = engine.currentAIActivity[color] {
-                aiAttemptsView(activity.attempts)
-            }
-
-            // Disclosure groups for raw prompts/responses
-            DisclosureGroup("System Prompt") {
-                ScrollView {
-                    Text(AIService.systemPrompt(for: color, isAppleIntelligence: player.useAppleIntelligence))
-                        .font(.caption2.monospaced())
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 200)
-            }
-            .font(.caption)
-
-            DisclosureGroup("Last Prompt") {
-                ScrollView {
-                    Text(engine.currentAIActivity[color]?.userPrompt ?? "No prompt yet")
-                        .font(.caption2.monospaced())
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 200)
-            }
-            .font(.caption)
-
-            DisclosureGroup("Last Response") {
-                ScrollView {
-                    Text(engine.currentAIActivity[color]?.responseText ?? "No response yet")
-                        .font(.caption2.monospaced())
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 200)
-            }
-            .font(.caption)
-        }
-    }
-
-    // MARK: - AI Attempts View
-
-    private func aiAttemptsView(_ attempts: [AITurnAttempt]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            let invalidCount = attempts.filter { !$0.isValid }.count
-            if invalidCount > 0 {
-                Text("\(invalidCount) invalid response\(invalidCount == 1 ? "" : "s") this turn")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-            }
-
-            // Show last 10 attempts to avoid performance issues with up to 100 retries
-            let displayAttempts = attempts.count > 10 ? Array(attempts.suffix(10)) : attempts
-            if attempts.count > 10 {
-                Text("(\(attempts.count - 10) earlier attempts hidden)")
+            // All moves this game in a grid
+            let history = engine.aiActivityHistory[color] ?? []
+            if history.isEmpty {
+                Text("No moves yet")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+            } else {
+                aiMovesGrid(history)
             }
-            ForEach(displayAttempts) { attempt in
+
+            // Current thinking text
+            if let activity = engine.currentAIActivity[color],
+               let lastAttempt = activity.attempts.last,
+               let thinking = lastAttempt.thinking, !thinking.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
-                    // Thinking (blue)
-                    if let thinking = attempt.thinking, !thinking.isEmpty {
-                        Text(thinking)
-                            .font(.caption2)
-                            .foregroundStyle(.blue)
-                            .textSelection(.enabled)
-                    }
+                    Text("Thinking")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(thinking)
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                        .textSelection(.enabled)
+                        .padding(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.blue.opacity(0.05))
+                        )
+                }
+            }
+        }
+    }
 
-                    // Move with status indicator
-                    HStack(spacing: 4) {
-                        if attempt.isValid {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .font(.caption2)
-                        } else {
-                            Image(systemName: "exclamationmark.circle.fill")
-                                .foregroundStyle(.red)
-                                .font(.caption2)
+    // MARK: - AI Moves Grid
+
+    private func aiMovesGrid(_ history: [AIActivityLog]) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            // Header row
+            HStack(spacing: 0) {
+                Text("")
+                    .frame(width: 16)
+                Text("Move")
+                    .frame(width: 50, alignment: .leading)
+                Text("Time")
+                    .frame(width: 52, alignment: .trailing)
+                Text("Tok In")
+                    .frame(width: 52, alignment: .trailing)
+                Text("Tok Out")
+                    .frame(width: 52, alignment: .trailing)
+                Text("t/s")
+                    .frame(width: 36, alignment: .trailing)
+            }
+            .font(.system(size: 9).bold())
+            .foregroundStyle(.tertiary)
+
+            // Move rows
+            let durations = engine.statistics.perMoveDuration[color] ?? []
+            ForEach(Array(history.enumerated()), id: \.offset) { index, log in
+                let successAttempt = log.attempts.last(where: { $0.isValid })
+                let moveText = successAttempt?.moveText ?? "?"
+                let retries = log.attempts.filter { !$0.isValid }.count
+                let elapsed = index < durations.count ? durations[index] : 0
+                let tokensIn = log.tokenUsage?.inputTokens
+                let tokensOut = log.tokenUsage?.outputTokens
+                let tokPerSec: Double? = {
+                    guard let out = tokensOut, elapsed > 0 else { return nil }
+                    return Double(out) / elapsed
+                }()
+
+                Button {
+                    let detail = AIActivityDetail(from: log, moveNumber: index + 1, color: color, elapsed: elapsed)
+                    openWindow(value: detail)
+                } label: {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Main move row
+                        HStack(spacing: 0) {
+                            Image(systemName: retries > 0 ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(retries > 0 ? .orange : .green)
+                                .frame(width: 16)
+
+                            Text(moveText)
+                                .font(.caption2.monospaced().bold())
+                                .frame(width: 50, alignment: .leading)
+
+                            Text(formatDuration(elapsed))
+                                .frame(width: 52, alignment: .trailing)
+
+                            if let tokIn = tokensIn {
+                                Text("\(tokIn)")
+                                    .frame(width: 52, alignment: .trailing)
+                            } else {
+                                Text("--")
+                                    .frame(width: 52, alignment: .trailing)
+                            }
+
+                            if let tokOut = tokensOut {
+                                Text("\(tokOut)")
+                                    .frame(width: 52, alignment: .trailing)
+                            } else {
+                                Text("--")
+                                    .frame(width: 52, alignment: .trailing)
+                            }
+
+                            if let tps = tokPerSec {
+                                Text(String(format: "%.0f", tps))
+                                    .frame(width: 36, alignment: .trailing)
+                            } else {
+                                Text("--")
+                                    .frame(width: 36, alignment: .trailing)
+                            }
                         }
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(.primary)
 
-                        Text(attempt.moveText)
-                            .font(.caption2.monospaced().bold())
-
-                        if let comment = attempt.comment {
-                            Text("{ \(comment) }")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                        // Error details for invalid attempts
+                        let invalidAttempts = log.attempts.filter { !$0.isValid }
+                        ForEach(Array(invalidAttempts.enumerated()), id: \.offset) { _, attempt in
+                            HStack(spacing: 4) {
+                                Text(attempt.moveText)
+                                    .italic()
+                                if let error = attempt.errorMessage {
+                                    Text("— \(error)")
+                                        .italic()
+                                }
+                            }
+                            .font(.system(size: 9))
+                            .foregroundStyle(.orange)
+                            .padding(.leading, 18)
                         }
                     }
-
-                    // Error message
-                    if let error = attempt.errorMessage {
-                        Text(error)
-                            .font(.caption2)
-                            .foregroundStyle(.red)
-                    }
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(index % 2 == 0 ? Color.clear : Color.primary.opacity(0.03))
+                    )
                 }
-                .padding(.vertical, 2)
-                .padding(.horizontal, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(attempt.isValid ? Color.green.opacity(0.05) : Color.red.opacity(0.05))
-                )
+                .buttonStyle(.plain)
+                .instantHelp("Click to view full details for this move")
             }
-        }
-    }
 
-    // MARK: - AI Settings Summary
-
-    @ViewBuilder
-    private var aiSettingsSummary: some View {
-        if let activity = engine.currentAIActivity[color] {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(activity.modelName)
-                    .font(.caption2.bold())
-                HStack(spacing: 8) {
-                    if let temp = activity.temperature {
-                        Text("temp: \(temp, specifier: "%.1f")")
-                    }
-                    if let budget = activity.thinkingBudget {
-                        Text("think: \(budget)")
-                    }
-                    if let maxTokens = activity.maxOutputTokens {
-                        Text("max: \(maxTokens)")
-                    }
+            // Totals row
+            let totalIn = history.compactMap { $0.tokenUsage?.inputTokens }.reduce(0, +)
+            let totalOut = history.compactMap { $0.tokenUsage?.outputTokens }.reduce(0, +)
+            if totalIn > 0 || totalOut > 0 {
+                Divider()
+                HStack(spacing: 0) {
+                    Text("")
+                        .frame(width: 16)
+                    Text("Total")
+                        .font(.system(size: 10).bold())
+                        .frame(width: 50, alignment: .leading)
+                    Text(formatDuration(totalTime))
+                        .frame(width: 52, alignment: .trailing)
+                    Text("\(totalIn)")
+                        .frame(width: 52, alignment: .trailing)
+                    Text("\(totalOut)")
+                        .frame(width: 52, alignment: .trailing)
+                    Text("")
+                        .frame(width: 36)
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            }
-        } else if player.useAppleIntelligence {
-            Text("Apple Intelligence (On-device)")
-                .font(.caption2.bold())
-        } else if let configID = player.aiConfigurationID,
-                  let config = engine.llmKit.configurations.first(where: { $0.id == configID }) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(config.name)
-                    .font(.caption2.bold())
-                HStack(spacing: 8) {
-                    Text("temp: \(config.temperature, specifier: "%.1f")")
-                    Text("max: \(config.maxOutputTokens)")
-                    if let budget = config.thinkingBudget {
-                        Text("think: \(budget)")
-                    }
-                }
-                .font(.caption2)
+                .font(.system(size: 10).monospacedDigit().bold())
                 .foregroundStyle(.secondary)
             }
         }
     }
-
-    // MARK: - Token Usage
-
-    private func tokenUsageView(_ tokens: TokenUsage) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Token Usage")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 12) {
-                if let input = tokens.inputTokens {
-                    Text("In: \(input)")
-                        .font(.caption2.monospacedDigit())
-                }
-                if let output = tokens.outputTokens {
-                    Text("Out: \(output)")
-                        .font(.caption2.monospacedDigit())
-                }
-                if let cache = tokens.cacheReadTokens, cache > 0 {
-                    Text("Cache: \(cache)")
-                        .font(.caption2.monospacedDigit())
-                }
-            }
-        }
-    }
-
 
     // MARK: - Helpers
 
@@ -461,23 +476,6 @@ struct PlayerPanelView: View {
             let mins = Int(seconds) / 60
             let secs = Int(seconds) % 60
             return "\(mins)m \(secs)s"
-        }
-    }
-}
-
-// MARK: - Stat Item
-
-struct StatItem: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(spacing: 1) {
-            Text(value)
-                .font(.callout.monospacedDigit().bold())
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
     }
 }

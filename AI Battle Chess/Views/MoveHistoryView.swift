@@ -5,27 +5,78 @@ import SwiftUI
 struct MoveHistoryView: View {
     @Bindable var engine: GameEngine
 
+    private let columnsPerRow = 5
+
+    /// The currently focused move (selected or last move in live view)
+    private var focusedMove: ChessMove? {
+        if let index = engine.viewingMoveIndex, index < engine.moveHistory.count {
+            return engine.moveHistory[index]
+        } else if !engine.isViewingHistory, let last = engine.moveHistory.last {
+            return last
+        }
+        return nil
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Navigation controls
-            navigationControls
+        VStack(alignment: .leading, spacing: 4) {
+            // Top bar: comment/thinking for focused move + live indicator
+            topBar
 
             Divider()
 
-            // Move list
+            // Move list in column-first layout
             ScrollViewReader { proxy in
                 ScrollView {
+                    let pairs = movePairs
+                    let numRows = pairs.isEmpty ? 0 : (pairs.count + columnsPerRow - 1) / columnsPerRow
+
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(movePairs.enumerated()), id: \.offset) { index, pair in
-                            moveRow(number: index + 1, pair: pair, proxy: proxy)
+                        ForEach(0..<numRows, id: \.self) { row in
+                            HStack(spacing: 0) {
+                                ForEach(0..<columnsPerRow, id: \.self) { col in
+                                    let pairIndex = col * numRows + row
+                                    if pairIndex < pairs.count {
+                                        let pair = pairs[pairIndex]
+                                        moveCell(number: pairIndex + 1, pair: pair)
+                                    } else {
+                                        Spacer()
+                                            .frame(minWidth: 100)
+                                    }
+                                    if col < columnsPerRow - 1 {
+                                        Divider()
+                                            .frame(height: 16)
+                                            .padding(.horizontal, 2)
+                                    }
+                                }
+                                Spacer()
+                            }
+                            .id(row)
+                        }
+
+                        // Game result at end
+                        if let result = engine.gameResult {
+                            HStack(spacing: 6) {
+                                Text(result.pgnResult)
+                                    .font(.caption.monospaced().bold())
+                                    .foregroundStyle(.orange)
+                                Text(result.displayText)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 4)
+                            .id("gameResult")
                         }
                     }
                     .padding(.horizontal, 4)
                 }
-                .onChange(of: engine.moveHistory.count) { _, _ in
-                    if !engine.isViewingHistory, let lastIndex = movePairs.indices.last {
-                        withAnimation {
-                            proxy.scrollTo(lastIndex, anchor: .bottom)
+                .onChange(of: engine.moveHistory.count, initial: false) { _, _ in
+                    if !engine.isViewingHistory {
+                        let pairs = movePairs
+                        let numRows = pairs.isEmpty ? 0 : (pairs.count + columnsPerRow - 1) / columnsPerRow
+                        if numRows > 0 {
+                            withAnimation {
+                                proxy.scrollTo(numRows - 1, anchor: .bottom)
+                            }
                         }
                     }
                 }
@@ -40,46 +91,51 @@ struct MoveHistoryView: View {
         .padding(8)
     }
 
-    // MARK: - Navigation Controls
+    // MARK: - Top Bar
 
-    private var navigationControls: some View {
+    private var topBar: some View {
         HStack(spacing: 8) {
-            Button { engine.navigateFirst() } label: {
-                Image(systemName: "backward.end.fill")
+            // Comment or thinking from focused move
+            if let move = focusedMove {
+                if let comment = move.comment, !comment.isEmpty {
+                    Image(systemName: "text.bubble")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(comment)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                } else if let thinking = move.thinking, !thinking.isEmpty {
+                    Image(systemName: "brain")
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                    Text(thinking)
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                        .lineLimit(2)
+                }
             }
-            .disabled(engine.moveHistory.isEmpty)
-
-            Button { engine.navigatePrevious() } label: {
-                Image(systemName: "backward.fill")
-            }
-            .disabled(engine.moveHistory.isEmpty)
 
             Spacer()
 
             if engine.isViewingHistory {
                 Text("Move \((engine.viewingMoveIndex ?? 0) + 1) of \(engine.moveHistory.count)")
-                    .font(.body)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-            } else {
-                Text("Live")
-                    .font(.body.bold())
-                    .foregroundStyle(.green)
-            }
 
-            Spacer()
-
-            if engine.isViewingHistory {
-                // Replace forward buttons with "Return to Live"
                 Button("Return to Live") {
                     engine.returnToLive()
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.mini)
                 .tint(.green)
+            } else if engine.isGameActive {
+                Text("Live")
+                    .font(.caption.bold())
+                    .foregroundStyle(.green)
             }
         }
-        .buttonStyle(.borderless)
-        .controlSize(.small)
+        .frame(minHeight: 20)
     }
 
     // MARK: - Move Pairs
@@ -112,51 +168,60 @@ struct MoveHistoryView: View {
         if index < engine.moveSANCache.count {
             return engine.moveSANCache[index]
         }
-        // Fallback to dynamic computation if cache is not yet populated
         guard index < engine.moveHistory.count && index < engine.boardStates.count else { return "?" }
         return PGNFormatter.moveToSAN(engine.moveHistory[index], on: engine.boardStates[index])
     }
 
-    // MARK: - Move Row
+    // MARK: - Move Cell
 
-    private func moveRow(number: Int, pair: MovePair, proxy: ScrollViewProxy) -> some View {
-        HStack(spacing: 4) {
+    private func moveCell(number: Int, pair: MovePair) -> some View {
+        HStack(spacing: 0) {
             Text("\(number).")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 28, alignment: .trailing)
+                .foregroundStyle(.tertiary)
+                .frame(width: 24, alignment: .trailing)
 
             moveButton(san: pair.whiteSAN, index: pair.whiteIndex)
+                .frame(width: 58, alignment: .leading)
 
             if let blackSAN = pair.blackSAN, let blackIndex = pair.blackIndex {
                 moveButton(san: blackSAN, index: blackIndex)
+                    .frame(width: 58, alignment: .leading)
+            } else {
+                Spacer().frame(width: 58)
             }
-
-            Spacer()
         }
-        .id(number - 1)
     }
 
     private func moveButton(san: String, index: Int) -> some View {
         let isViewing = engine.viewingMoveIndex == index
         let isLastMove = !engine.isViewingHistory && index == engine.moveHistory.count - 1
+        let move = index < engine.moveHistory.count ? engine.moveHistory[index] : nil
+        let hasComment = move?.comment != nil || move?.thinking != nil
 
         return Button {
             engine.navigateToMove(index)
         } label: {
-            Text(san)
-                .font(.caption.monospaced())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(isViewing ? Color.accentColor.opacity(0.3) :
-                              isLastMove ? Color.accentColor.opacity(0.1) :
-                              Color.clear)
-                )
+            HStack(spacing: 2) {
+                Text(san)
+                    .font(.caption.monospaced())
+                if hasComment {
+                    Image(systemName: "text.bubble.fill")
+                        .font(.system(size: 6))
+                        .foregroundStyle(.blue.opacity(0.5))
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(isViewing ? Color.accentColor.opacity(0.3) :
+                          isLastMove ? Color.accentColor.opacity(0.1) :
+                          Color.clear)
+            )
         }
         .buttonStyle(.plain)
-        .frame(minWidth: 48, alignment: .leading)
+        .frame(minWidth: 40, alignment: .leading)
     }
 
     // MARK: - PGN Section

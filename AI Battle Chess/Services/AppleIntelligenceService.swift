@@ -33,7 +33,9 @@ final class AppleIntelligenceService {
         color: PieceColor,
         gameID: UUID,
         gameTurnIndex: Int,
-        positionRepetitionCount: Int = 1
+        positionRepetitionCount: Int = 1,
+        positionCounts: [ChessBoard.PositionKey: Int] = [:],
+        allowResign: Bool = true
     ) async throws -> (result: AIMoveResult, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
         guard AppleIntelligenceService.isAvailable else {
             print("[AppleIntelligence] ERROR: Apple Intelligence is not available on this device")
@@ -42,11 +44,12 @@ final class AppleIntelligenceService {
 
         var penalties: [AIPenalty] = []
         var retries = 0
+        var consecutiveErrors = 0
         var lastActivityLog: AIActivityLog? = nil
         var attempts: [AITurnAttempt] = []
 
         let systemPrompt = AIService.systemPrompt(for: color, isAppleIntelligence: true, board: board)
-        let userPrompt = AIService.boardStatePrompt(board: board, positionRepetitionCount: positionRepetitionCount)
+        let userPrompt = AIService.boardStatePrompt(board: board, positionRepetitionCount: positionRepetitionCount, positionCounts: positionCounts, allowResign: allowResign)
 
         print("[AppleIntelligence] ====== REQUEST ======")
         print("[AppleIntelligence] Color: \(color.displayName) | Turn: \(gameTurnIndex) | Game: \(gameID.uuidString.prefix(8))")
@@ -92,6 +95,7 @@ final class AppleIntelligenceService {
                     generating: ChessMoveResponse.self
                 )
 
+                consecutiveErrors = 0
                 let generated = response.content
                 let rawMove = generated.move.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -145,6 +149,19 @@ final class AppleIntelligenceService {
 
                 // Check for resignation or draw claim
                 if let specialResult = AIService.detectSpecialAction(cleanedMoveText, color: color) {
+                    // Block resignation if not allowed
+                    if !allowResign, case .resignation = specialResult {
+                        let reason = "resignation is not allowed"
+                        let correction = AIService.correctionPrompt(badMove: cleanedMoveText, reason: reason, board: board)
+                        print("[AppleIntelligence] BLOCKED RESIGNATION — sending correction")
+                        attempts.append(AITurnAttempt(thinking: thinking, moveText: cleanedMoveText, comment: moveComment, isValid: false, errorMessage: reason))
+                        lastActivityLog?.attempts = attempts
+                        currentPrompt = correction
+                        penalties.append(AIPenalty(reason: "Blocked resignation (attempt \(attempt + 1))", severity: .warning, timestamp: Date()))
+                        retries += 1
+                        turnsSinceReset += 1
+                        continue
+                    }
                     print("[AppleIntelligence] SPECIAL ACTION detected: \(specialResult)")
                     print("[AppleIntelligence] ====== END REQUEST ======")
                     attempts.append(AITurnAttempt(thinking: thinking, moveText: cleanedMoveText, comment: moveComment, isValid: true, errorMessage: nil))
@@ -198,7 +215,7 @@ final class AppleIntelligenceService {
                 let newBoard = board.applyingMove(legalMove)
                 let isCheck = MoveValidator.isKingInCheck(color: board.activeColor.opposite, on: newBoard)
                 let isCheckmate = isCheck && MoveValidator.isCheckmate(on: newBoard)
-                let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate, comment: moveComment)
+                let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate, comment: moveComment, thinking: thinking)
 
                 attempts.append(AITurnAttempt(thinking: thinking, moveText: cleanedMoveText, comment: moveComment, isValid: true, errorMessage: nil))
                 lastActivityLog?.attempts = attempts
@@ -230,6 +247,7 @@ final class AppleIntelligenceService {
                     timestamp: Date()
                 ))
                 retries += 1
+                consecutiveErrors += 1
                 if attempt >= AIService.maxRetries - 1 {
                     print("[AppleIntelligence] FATAL: All \(AIService.maxRetries) attempts failed")
                     print("[AppleIntelligence] ====== END REQUEST (FAILURE) ======")
@@ -240,6 +258,29 @@ final class AppleIntelligenceService {
                         lastActivityLog: lastActivityLog
                     )
                 }
+
+                // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s max
+                guard !Task.isCancelled else {
+                    throw AIServiceFailure(
+                        underlyingError: CancellationError(),
+                        penalties: penalties,
+                        retries: retries,
+                        lastActivityLog: lastActivityLog
+                    )
+                }
+                let delay = min(pow(2.0, Double(consecutiveErrors - 1)), 60.0)
+                print("[AppleIntelligence] Backing off \(String(format: "%.0f", delay))s before retry...")
+                do {
+                    try await Task.sleep(for: .seconds(delay))
+                } catch {
+                    throw AIServiceFailure(
+                        underlyingError: CancellationError(),
+                        penalties: penalties,
+                        retries: retries,
+                        lastActivityLog: lastActivityLog
+                    )
+                }
+
                 // On error, reset to a fresh session for next attempt
                 session = LanguageModelSession(instructions: systemPrompt)
                 currentPrompt = userPrompt

@@ -40,6 +40,7 @@ final class GameEngine {
     var currentAIColor: PieceColor? = nil
     var statistics: GameStatistics = GameStatistics()
     var currentAIActivity: [PieceColor: AIActivityLog] = [:]
+    var aiActivityHistory: [PieceColor: [AIActivityLog]] = [.white: [], .black: []]
     var positionCounts: [ChessBoard.PositionKey: Int] = [:]
     private(set) var moveSANCache: [String] = []
 
@@ -195,6 +196,7 @@ final class GameEngine {
         isAIThinking = false
         currentAIColor = nil
         currentAIActivity = [:]
+        aiActivityHistory = [.white: [], .black: []]
         gameFinalized = false
         statistics = GameStatistics()
         statistics.gameStartTime = Date()
@@ -360,6 +362,21 @@ final class GameEngine {
         // Store board state before the move
         boardStates.append(board)
 
+        // Instantly complete any in-flight animation before starting the new one.
+        // Using a zero-duration transaction prevents SwiftUI from interpolating
+        // from the mid-flight position, which causes a visual snap-back glitch.
+        if animatingMove != nil {
+            animationTask?.cancel()
+            animationTask = nil
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                animatingMove = nil
+                animatingFileDelta = 0
+                animatingRankDelta = 0
+            }
+        }
+
         // Set up animation: piece starts at source offset, animates to zero
         animatingMove = annotatedMove
         animatingFileDelta = move.from.file - move.to.file
@@ -383,11 +400,8 @@ final class GameEngine {
             isGameActive = false
             statusMessage = result.displayText
 
-            let distance = max(abs(annotatedMove.to.file - annotatedMove.from.file),
-                             abs(annotatedMove.to.rank - annotatedMove.from.rank))
-            let duration = max(Double(distance) / 2.5, 0.30)
-            let moveID = annotatedMove.id
-            startMoveAnimation(moveID: moveID, duration: duration)
+            let duration = animationDuration(for: annotatedMove)
+            startMoveAnimation(moveID: annotatedMove.id, duration: duration)
 
             finalizeCurrentGame()
             return
@@ -395,11 +409,8 @@ final class GameEngine {
 
         statusMessage = "\(board.activeColor.displayName)'s turn"
 
-        let distance = max(abs(annotatedMove.to.file - annotatedMove.from.file),
-                         abs(annotatedMove.to.rank - annotatedMove.from.rank))
-        let duration = max(Double(distance) / 2.5, 0.30)
-        let moveID = annotatedMove.id
-        startMoveAnimation(moveID: moveID, duration: duration)
+        let duration = animationDuration(for: annotatedMove)
+        startMoveAnimation(moveID: annotatedMove.id, duration: duration)
 
         // Trigger AI if needed
         triggerAIMoveIfNeeded()
@@ -421,6 +432,7 @@ final class GameEngine {
         let gameTurnIndex = moveCount(for: color)
         let gameID = currentGameID
         let repetitionCount = currentPositionRepetitionCount
+        let posCountsSnapshot = positionCounts
 
         aiTask = Task { [weak self] in
             guard let self else { return }
@@ -434,7 +446,9 @@ final class GameEngine {
                         color: color,
                         gameID: gameID,
                         gameTurnIndex: gameTurnIndex,
-                        positionRepetitionCount: repetitionCount
+                        positionRepetitionCount: repetitionCount,
+                        positionCounts: posCountsSnapshot,
+                        allowResign: player.allowResign
                     )
                 } else if let configID = player.aiConfigurationID {
                     aiResult = try await aiService.requestMove(
@@ -443,7 +457,9 @@ final class GameEngine {
                         color: color,
                         gameID: gameID,
                         gameTurnIndex: gameTurnIndex,
-                        positionRepetitionCount: repetitionCount
+                        positionRepetitionCount: repetitionCount,
+                        positionCounts: posCountsSnapshot,
+                        allowResign: player.allowResign
                     )
                 } else {
                     throw AIError.noConfigurationSelected
@@ -460,6 +476,7 @@ final class GameEngine {
                 // Store activity log
                 if let log = aiResult.activityLog {
                     currentAIActivity[color] = log
+                    aiActivityHistory[color, default: []].append(log)
                 }
 
                 isAIThinking = false
@@ -646,6 +663,21 @@ final class GameEngine {
         }
     }
 
+    /// Computes animation duration for a move, capped at 80% of the opponent's
+    /// average response time so animations tend to finish before the next move arrives.
+    private func animationDuration(for move: ChessMove) -> Double {
+        let distance = max(abs(move.to.file - move.from.file),
+                         abs(move.to.rank - move.from.rank))
+        let baseDuration = max(Double(distance) / 2.5, 0.30)
+
+        // Cap at 80% of the opponent's average move time
+        let opponentAvg = averageMoveTime(for: move.piece.color.opposite)
+        if opponentAvg > 0 {
+            return min(baseDuration, opponentAvg * 0.8)
+        }
+        return baseDuration
+    }
+
     // MARK: - Game Navigation (Up/Down arrows)
 
     /// Snapshot of live game state, saved before viewing past games.
@@ -660,6 +692,7 @@ final class GameEngine {
         let statusMessage: String
         let currentGameID: UUID
         let currentAIActivity: [PieceColor: AIActivityLog]
+        let aiActivityHistory: [PieceColor: [AIActivityLog]]
         let positionCounts: [ChessBoard.PositionKey: Int]
         let moveSANCache: [String]
         let gameFinalized: Bool
@@ -719,6 +752,7 @@ final class GameEngine {
             statusMessage: statusMessage,
             currentGameID: currentGameID,
             currentAIActivity: currentAIActivity,
+            aiActivityHistory: aiActivityHistory,
             positionCounts: positionCounts,
             moveSANCache: moveSANCache,
             gameFinalized: gameFinalized,
@@ -743,6 +777,7 @@ final class GameEngine {
         statusMessage = snapshot.statusMessage
         currentGameID = snapshot.currentGameID
         currentAIActivity = snapshot.currentAIActivity
+        aiActivityHistory = snapshot.aiActivityHistory
         positionCounts = snapshot.positionCounts
         moveSANCache = snapshot.moveSANCache
         gameFinalized = snapshot.gameFinalized
@@ -758,6 +793,10 @@ final class GameEngine {
 
     private func loadGameRecord(_ record: GameRecord) {
         loadGame(pgn: record.pgnText)
+        // Restore the original game's statistics (includes start time) and result
+        statistics = record.statistics
+        gameResult = record.result
+        currentGameID = record.id
         statusMessage = "Viewing game #\(record.id.uuidString.prefix(8))"
     }
 
@@ -793,6 +832,8 @@ final class GameEngine {
         animatingRankDelta = 0
         errorMessage = nil
         isAIThinking = false
+        currentAIActivity = [:]
+        aiActivityHistory = [.white: [], .black: []]
         statistics = GameStatistics()
         positionCounts = [board.positionKey: 1]
         moveSANCache = []

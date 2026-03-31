@@ -29,6 +29,14 @@ struct ProviderSettingsView: View {
     @State private var discoveryError: String? = nil
     @State private var discoveryTask: Task<Void, Never>? = nil
 
+    // Configuration editor state
+    @State private var editingConfigID: UUID? = nil
+    @State private var editName: String = ""
+    @State private var editTemperature: Double = 0.7
+    @State private var editMaxOutputTokens: Int = 4096
+    @State private var editMaxContextTokens: Int = 128_000
+    @State private var editThinkingBudget: Int? = nil
+
     // Compile-time constant URLs -- force-unwrap is acceptable here.
     // swiftlint:disable force_unwrapping
     private static let templates: [ProviderTemplate] = [
@@ -54,7 +62,10 @@ struct ProviderSettingsView: View {
                         defaultEndpoint: URL(string: "http://localhost:11434")!,
                         requiresAPIKey: false),
         ProviderTemplate(id: "ollama-cloud", name: "Ollama Cloud", apiType: .ollama,
-                        defaultEndpoint: URL(string: "https://ollama.com")!,
+                        defaultEndpoint: URL(string: "https://ollama.com/api")!,
+                        requiresAPIKey: true),
+        ProviderTemplate(id: "huggingface", name: "Hugging Face", apiType: .huggingFace,
+                        defaultEndpoint: URL(string: "https://router.huggingface.co/v1")!,
                         requiresAPIKey: true),
         ProviderTemplate(id: "lmstudio", name: "LM Studio (Local)", apiType: .lmStudio,
                         defaultEndpoint: URL(string: "http://localhost:1234/v1")!,
@@ -205,18 +216,11 @@ struct ProviderSettingsView: View {
                     DisclosureGroup(providerName) {
                         if let configs = grouped[providerID] {
                             ForEach(configs) { config in
-                                HStack {
-                                    Text(config.name)
-                                        .font(.caption)
-                                    Spacer()
-                                    Text("temp: \(config.temperature, specifier: "%.1f")")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                    Text("max: \(config.maxOutputTokens)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                if editingConfigID == config.id {
+                                    configEditor(for: config)
+                                } else {
+                                    configRow(for: config)
                                 }
-                                .padding(.vertical, 2)
                             }
                         }
                     }
@@ -224,6 +228,134 @@ struct ProviderSettingsView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Configuration Row
+
+    private func configRow(for config: ModelConfiguration) -> some View {
+        HStack {
+            Text(config.name)
+                .font(.caption)
+            Spacer()
+            Text("temp: \(config.temperature, specifier: "%.1f")")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("max: \(config.maxOutputTokens)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("ctx: \(config.maxContextTokens)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let budget = config.thinkingBudget {
+                Text("think: \(budget)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+        .contextMenu {
+            Button("Edit") {
+                startEditing(config)
+            }
+            Button("Duplicate & Edit") {
+                if let duplicate = llmKit.duplicateConfiguration(id: config.id) {
+                    startEditing(duplicate)
+                }
+            }
+            Divider()
+            Button("Delete", role: .destructive) {
+                llmKit.deleteConfiguration(id: config.id)
+            }
+        }
+    }
+
+    // MARK: - Configuration Editor
+
+    private func startEditing(_ config: ModelConfiguration) {
+        editingConfigID = config.id
+        editName = config.name
+        editTemperature = config.temperature
+        editMaxOutputTokens = config.maxOutputTokens
+        editMaxContextTokens = config.maxContextTokens
+        editThinkingBudget = config.thinkingBudget
+    }
+
+    private func configEditor(for config: ModelConfiguration) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Name", text: $editName)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Temperature")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Slider(value: $editTemperature, in: 0...2, step: 0.1)
+                            .frame(width: 100)
+                        Text("\(editTemperature, specifier: "%.1f")")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 28)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Max Output Tokens")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TextField("", value: $editMaxOutputTokens, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                        .font(.caption)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Context Size")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TextField("", value: $editMaxContextTokens, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                        .font(.caption)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Thinking Budget")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TextField("None", value: $editThinkingBudget, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                        .font(.caption)
+                }
+            }
+
+            HStack {
+                Button("Save") {
+                    var updated = config
+                    updated.name = editName
+                    updated.temperature = editTemperature
+                    updated.maxOutputTokens = editMaxOutputTokens
+                    updated.maxContextTokens = editMaxContextTokens
+                    updated.thinkingBudget = editThinkingBudget
+                    llmKit.updateConfiguration(updated)
+                    editingConfigID = nil
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+
+                Button("Cancel") {
+                    editingConfigID = nil
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.accentColor.opacity(0.05))
+        )
     }
 
     // MARK: - Actions
@@ -273,6 +405,22 @@ struct ProviderSettingsView: View {
             }
 
             discoveryError = nil
+
+            // Fetch models immediately after saving/updating a key
+            print("[ProviderSettings] Triggering model refresh after key update for '\(template.name)'")
+            discoveryTask?.cancel()
+            isDiscovering = true
+            discoveryTask = Task {
+                await llmKit.forceRefresh()
+                guard !Task.isCancelled else { return }
+                llmKit.autoCreateConfigurations()
+                isDiscovering = false
+
+                let errors = llmKit.refreshErrors
+                if !errors.isEmpty {
+                    discoveryError = errors.values.joined(separator: "; ")
+                }
+            }
         } catch {
             print("[ProviderSettings] ERROR saving provider '\(template.name)': \(error)")
             discoveryError = "Failed to save provider: \(error.localizedDescription)"
