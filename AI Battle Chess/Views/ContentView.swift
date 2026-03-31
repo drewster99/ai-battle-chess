@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var engine: GameEngine
     @State private var showNewGameConfirmation = false
+    @State private var showSetup = true
     @FocusState private var isGameFocused: Bool
 
     /// Background tint when viewing historical moves
@@ -13,16 +14,13 @@ struct ContentView: View {
     }
 
     var body: some View {
-        Group {
-            if engine.isGameActive || engine.gameResult != nil {
-                gameView
-            } else {
+        gameView
+            .frame(minWidth: 1400, minHeight: 700)
+            .background(historyTint)
+            .animation(.easeInOut(duration: 0.3), value: engine.isViewingHistory)
+            .sheet(isPresented: $showSetup) {
                 GameSetupView(engine: engine)
             }
-        }
-        .frame(minWidth: 1400, minHeight: 700)
-        .background(historyTint)
-        .animation(.easeInOut(duration: 0.3), value: engine.isViewingHistory)
     }
 
     // MARK: - Game View
@@ -112,8 +110,7 @@ struct ContentView: View {
             titleVisibility: .visible
         ) {
             Button("Abandon Game", role: .destructive) {
-                engine.isGameActive = false
-                engine.gameResult = nil
+                showSetup = true
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -149,8 +146,7 @@ struct ContentView: View {
                     if engine.isGameActive {
                         showNewGameConfirmation = true
                     } else {
-                        engine.isGameActive = false
-                        engine.gameResult = nil
+                        showSetup = true
                     }
                 }
                 .controlSize(.small)

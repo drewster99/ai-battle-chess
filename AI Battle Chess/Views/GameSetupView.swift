@@ -5,6 +5,7 @@ import SwiftLLMKit
 
 struct GameSetupView: View {
     @Bindable var engine: GameEngine
+    @Environment(\.dismiss) private var dismiss
     @State private var whitePlayerName: String = "Player"
     @State private var blackPlayerName: String = "AI Opponent"
     @State private var whiteIsAI: Bool = false
@@ -196,9 +197,10 @@ struct GameSetupView: View {
                 Button("Load") {
                     engine.loadGame(pgn: pgnText)
                     if engine.errorMessage != nil {
-                        // Leave the sheet open so the user sees the error
+                        // Leave the PGN sheet open so the user sees the error
                     } else {
                         showLoadPGN = false
+                        dismiss() // Also dismiss the setup sheet
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -255,6 +257,7 @@ struct GameSetupView: View {
         }
 
         engine.startNewGame()
+        dismiss()
     }
 
     private func buildPlayerConfig(name: String, isAI: Bool, aiSelection: AISelection?, color: PieceColor) -> PlayerConfig {
