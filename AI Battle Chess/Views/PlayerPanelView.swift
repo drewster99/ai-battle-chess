@@ -39,7 +39,7 @@ struct PlayerPanelView: View {
                     Button("Resign") {
                         engine.resign(color: color)
                     }
-                    .disabled(!isCurrentTurn || engine.isAIThinking)
+                    .disabled(engine.isAIThinking)
                     .buttonStyle(.bordered)
                     .tint(.red)
                     .controlSize(.small)
@@ -162,7 +162,7 @@ struct PlayerPanelView: View {
                     .foregroundStyle(.secondary)
             }
 
-            let totalGames = engine.gameHistoryManager.totalGamesForPlayer(name: player.name) + 1
+            let totalGames = engine.gameHistoryManager.totalGamesForPlayer(name: player.name) + (engine.isGameActive ? 1 : 0)
             Label("\(totalGames)", systemImage: "number")
                 .font(.caption2)
                 .foregroundStyle(.secondary)

@@ -22,7 +22,12 @@ struct AILogger {
     ///
     /// Resolves to `~/Library/Application Support/AI Battle Chess/games/`.
     static var baseDirectory: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            // Fallback to temp directory if Application Support is unavailable
+            return FileManager.default.temporaryDirectory
+                .appendingPathComponent("AI Battle Chess", isDirectory: true)
+                .appendingPathComponent("games", isDirectory: true)
+        }
         return appSupport
             .appendingPathComponent("AI Battle Chess", isDirectory: true)
             .appendingPathComponent("games", isDirectory: true)
@@ -94,10 +99,11 @@ struct AILogger {
     /// - Parameter input: The raw string to sanitize.
     /// - Returns: A filesystem-safe lowercased string.
     private static func sanitizeForFilesystem(_ input: String) -> String {
-        input
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
-            .replacingOccurrences(of: " ", with: "_")
+        let disallowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_.")).inverted
+        return input
+            .unicodeScalars
+            .map { disallowed.contains($0) ? "_" : String($0) }
+            .joined()
             .lowercased()
     }
 

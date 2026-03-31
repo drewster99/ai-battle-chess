@@ -183,7 +183,9 @@ struct ChessBoard: Equatable, Sendable {
     }
 
     func capturedPieces(for color: PieceColor) -> [PieceType] {
-        // Calculate based on what's missing from the starting set
+        // Calculate based on what's missing from the starting set,
+        // accounting for promotions: promoted pawns add to the promoted type
+        // but should not count as "captured pawns."
         let startingPieces: [PieceType: Int] = [
             .pawn: 8, .knight: 2, .bishop: 2, .rook: 2, .queen: 1, .king: 1
         ]
@@ -192,10 +194,22 @@ struct ChessBoard: Equatable, Sendable {
             currentCounts[piece.type, default: 0] += 1
         }
 
+        // Count promotions: any non-pawn piece exceeding its starting count was promoted from a pawn.
+        var promotedPawns = 0
+        for type in [PieceType.queen, .rook, .bishop, .knight] {
+            let excess = max(0, (currentCounts[type, default: 0]) - startingPieces[type, default: 0])
+            promotedPawns += excess
+        }
+
         var captured: [PieceType] = []
         for (type, startCount) in startingPieces {
+            var adjustedStart = startCount
+            if type == .pawn {
+                // Reduce expected pawns by the number that promoted
+                adjustedStart -= promotedPawns
+            }
             let current = currentCounts[type, default: 0]
-            let missing = max(0, startCount - current)
+            let missing = max(0, adjustedStart - current)
             for _ in 0..<missing {
                 captured.append(type)
             }

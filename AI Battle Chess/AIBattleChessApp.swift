@@ -29,23 +29,26 @@ struct AIBattleChessApp: App {
                 // Refresh model catalog and auto-create configurations
                 Task {
                     await llmKit.refreshIfNeeded()
-                    autoCreateConfigurations()
+                    llmKit.autoCreateConfigurations()
                 }
             }
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1600, height: 900)
     }
+}
 
-    /// Automatically creates a ModelConfiguration for each discovered model with reasonable defaults.
-    private func autoCreateConfigurations() {
-        let existingConfigs = llmKit.configurations
-        let allModels = llmKit.providers.flatMap { provider in
-            llmKit.models(for: provider.id).map { (provider, $0) }
+// MARK: - Auto-Create Configurations
+
+extension LLMKitManager {
+    /// Creates a ModelConfiguration for each discovered model that doesn't already have one.
+    func autoCreateConfigurations() {
+        let existingConfigs = configurations
+        let allModels = providers.flatMap { provider in
+            models(for: provider.id).map { (provider, $0) }
         }
 
         for (provider, model) in allModels {
-            // Check if a configuration already exists for this provider+model combo
             let alreadyExists = existingConfigs.contains { config in
                 config.providerID == provider.id && config.modelID == model.modelID
             }
@@ -60,7 +63,7 @@ struct AIBattleChessApp: App {
                 maxContextTokens: model.maxInputTokens ?? 128_000,
                 streaming: false
             )
-            llmKit.addConfiguration(config)
+            addConfiguration(config)
         }
     }
 }

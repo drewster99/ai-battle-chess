@@ -16,7 +16,9 @@ struct PGNFormatter {
         if move.piece.type == .pawn {
             // Pawn moves
             if move.capturedPiece != nil || move.isEnPassant {
-                san += String(Character(UnicodeScalar(97 + move.from.file)!))
+                if let scalar = UnicodeScalar(97 + move.from.file) {
+                    san += String(Character(scalar))
+                }
                 san += "x"
             }
             san += move.to.description
@@ -83,6 +85,7 @@ struct PGNFormatter {
 
         // Moves
         for (index, move) in moves.enumerated() {
+            guard index < boardStates.count else { break }
             let boardBefore = boardStates[index]
             let san = moveToSAN(move, on: boardBefore)
 
@@ -166,7 +169,7 @@ struct PGNFormatter {
         // Determine piece type
         let pieceType: PieceType
         var remaining = s
-        let first = remaining.first!
+        guard let first = remaining.first else { return nil }
         if first.isUppercase {
             guard let pt = pieceTypeFromNotation(first) else { return nil }
             pieceType = pt
@@ -203,11 +206,12 @@ struct PGNFormatter {
             let filtered = candidates.filter { move in
                 for ch in disambig {
                     if ch >= "a" && ch <= "h" {
-                        let fileVal = Int(ch.asciiValue!) - 97
+                        guard let ascii = ch.asciiValue else { return false }
+                        let fileVal = Int(ascii) - 97
                         if move.from.file != fileVal { return false }
                     } else if ch >= "1" && ch <= "8" {
-                        let rankVal = ch.wholeNumberValue! - 1
-                        if move.from.rank != rankVal { return false }
+                        guard let rankVal = ch.wholeNumberValue else { return false }
+                        if move.from.rank != rankVal - 1 { return false }
                     }
                 }
                 return true
@@ -219,8 +223,11 @@ struct PGNFormatter {
         }
 
         // For pawn captures, first char might be the source file
-        if pieceType == .pawn && isCapture && !disambig.isEmpty {
-            let sourceFile = Int(disambig.first!.asciiValue!) - 97
+        if pieceType == .pawn && isCapture && !disambig.isEmpty,
+           let firstChar = disambig.first,
+           firstChar >= "a" && firstChar <= "h",
+           let ascii = firstChar.asciiValue {
+            let sourceFile = Int(ascii) - 97
             let match = candidates.first { $0.from.file == sourceFile }
             if let m = match {
                 return (m.from, m.to, m.promotionType ?? promotion)
@@ -244,8 +251,8 @@ struct PGNFormatter {
             $0.piece.type == move.piece.type && $0.position != move.from
         }
 
-        let competing = sameTypePieces.filter { (_, pos) in
-            let moves = MoveValidator.legalMoves(for: ChessPiece(color: move.piece.color, type: move.piece.type), at: pos, on: board)
+        let competing = sameTypePieces.filter { (piece, pos) in
+            let moves = MoveValidator.legalMoves(for: piece, at: pos, on: board)
             return moves.contains { $0.to == move.to }
         }
 
@@ -254,8 +261,8 @@ struct PGNFormatter {
         let sameFile = competing.contains { $0.position.file == move.from.file }
         let sameRank = competing.contains { $0.position.rank == move.from.rank }
 
-        if !sameFile {
-            return String(Character(UnicodeScalar(97 + move.from.file)!))
+        if !sameFile, let scalar = UnicodeScalar(97 + move.from.file) {
+            return String(Character(scalar))
         } else if !sameRank {
             return "\(move.from.rank + 1)"
         } else {

@@ -43,7 +43,11 @@ final class GameHistoryManager {
     private static let appSupportDirectoryName = "AI Battle Chess"
 
     private var gamesRootURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return FileManager.default.temporaryDirectory
+                .appendingPathComponent(Self.appSupportDirectoryName)
+                .appendingPathComponent(Self.gamesDirectoryName)
+        }
         return appSupport
             .appendingPathComponent(Self.appSupportDirectoryName)
             .appendingPathComponent(Self.gamesDirectoryName)
@@ -82,6 +86,9 @@ final class GameHistoryManager {
             print("[GameHistoryManager] Failed to save game \(record.id): \(error)")
             return
         }
+
+        // Prevent duplicate insertion
+        guard !gameRecords.contains(where: { $0.id == record.id }) else { return }
 
         // Insert while maintaining descending startTime order
         if let insertionIndex = gameRecords.firstIndex(where: { $0.startTime < record.startTime }) {

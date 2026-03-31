@@ -45,9 +45,11 @@ final class AppleIntelligenceService {
         var lastActivityLog: AIActivityLog? = nil
 
         let systemPrompt = AIService.systemPrompt(for: color)
-        let session = LanguageModelSession(instructions: systemPrompt)
 
         for attempt in 0..<AIService.maxRetries {
+            // Create a fresh session per attempt to avoid accumulating failed turns in context
+            let session = LanguageModelSession(instructions: systemPrompt)
+
             do {
                 let userPrompt = AIService.boardStatePrompt(
                     board: board,
@@ -120,8 +122,6 @@ final class AppleIntelligenceService {
                 let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate)
 
                 return (annotatedMove, penalties, retries, lastActivityLog)
-            } catch let error as AIError {
-                throw error
             } catch {
                 let penalty = AIPenalty(
                     reason: "Apple Intelligence error: \(error.localizedDescription) (attempt \(attempt + 1))",

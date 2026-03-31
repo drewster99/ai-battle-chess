@@ -93,7 +93,8 @@ struct BoardPosition: Hashable, Equatable, Sendable, Codable, CustomStringConver
     let rank: Int // 0-7 (1-8)
 
     var description: String {
-        let fileChar = Character(UnicodeScalar(97 + file)!)
+        guard let scalar = UnicodeScalar(97 + file) else { return "?\(rank + 1)" }
+        let fileChar = Character(scalar)
         return "\(fileChar)\(rank + 1)"
     }
 

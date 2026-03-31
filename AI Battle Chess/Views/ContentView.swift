@@ -4,7 +4,6 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var engine: GameEngine
-    @State private var squareSize: CGFloat = 64
     @State private var showNewGameConfirmation = false
     @FocusState private var isGameFocused: Bool
 
@@ -66,12 +65,6 @@ struct ContentView: View {
                             Spacer()
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onAppear { squareSize = max(computedSize, 40) }
-                        .onChange(of: geo.size) { _, newSize in
-                            let h = newSize.height - 20
-                            let w = newSize.width - 40
-                            squareSize = max(min(w, h) / 8, 40)
-                        }
                     }
 
                     Divider()
@@ -91,6 +84,20 @@ struct ContentView: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
+        .overlay(alignment: .bottom) {
+            if let error = engine.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.red.opacity(0.85)))
+                    .padding(.bottom, 180)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .onTapGesture { engine.errorMessage = nil }
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: engine.errorMessage)
         .focusable()
         .focused($isGameFocused)
         .onAppear { isGameFocused = true }
@@ -193,7 +200,7 @@ struct ContentView: View {
             Spacer()
 
             // Session stats
-            let totalGames = engine.gameHistoryManager.totalGamesPlayed + 1
+            let totalGames = engine.gameHistoryManager.totalGamesPlayed + (engine.isGameActive ? 1 : 0)
             Text("Session: \(totalGames) games")
                 .font(.caption)
                 .foregroundStyle(.tertiary)

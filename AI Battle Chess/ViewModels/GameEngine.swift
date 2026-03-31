@@ -65,6 +65,7 @@ final class GameEngine {
     let llmKit: LLMKitManager
     let gameHistoryManager: GameHistoryManager
     private var aiTask: Task<Void, Never>? = nil
+    private var animationTask: Task<Void, Never>? = nil
     private var gameFinalized: Bool = false
 
     // MARK: - Init
@@ -146,6 +147,7 @@ final class GameEngine {
         boardStates = []
         gameResult = nil
         isGameActive = true
+        liveGameSnapshot = nil
         viewingMoveIndex = nil
         viewingGameIndex = nil
         selectedSquare = nil
@@ -348,12 +350,16 @@ final class GameEngine {
                 animatingRankDelta = 0
             }
             let moveID = annotatedMove.id
-            Task {
+            animationTask?.cancel()
+            animationTask = Task { [weak self] in
                 do {
                     try await Task.sleep(for: .seconds(duration + 0.05))
+                } catch is CancellationError {
+                    return
                 } catch {
-                    // Task cancelled
+                    // Unexpected error — log and continue cleanup
                 }
+                guard let self else { return }
                 if self.animatingMove?.id == moveID {
                     self.animatingMove = nil
                 }
@@ -376,12 +382,16 @@ final class GameEngine {
 
         // Clear animation flag after animation completes
         let moveID = annotatedMove.id
-        Task {
+        animationTask?.cancel()
+        animationTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(duration + 0.05))
+            } catch is CancellationError {
+                return
             } catch {
-                // Task cancelled
+                // Unexpected error — log and continue cleanup
             }
+            guard let self else { return }
             if self.animatingMove?.id == moveID {
                 self.animatingMove = nil
             }
@@ -469,9 +479,10 @@ final class GameEngine {
                         timestamp: Date()
                     )
                     statistics.aiPenalties[color, default: []].append(penalty)
-                    gameResult = .resignation(winner: color.opposite)
+                    let result = GameResult.resignation(winner: color.opposite)
+                    gameResult = result
                     isGameActive = false
-                    statusMessage = gameResult?.displayText ?? "Game over"
+                    statusMessage = result.displayText
                     finalizeCurrentGame()
                 } else {
                     errorMessage = "AI Error: \(error.localizedDescription)"
@@ -580,12 +591,16 @@ final class GameEngine {
         }
 
         let moveID = move.id
-        Task {
+        animationTask?.cancel()
+        animationTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(duration + 0.05))
+            } catch is CancellationError {
+                return
             } catch {
-                // Task cancelled
+                // Unexpected error — log and continue cleanup
             }
+            guard let self else { return }
             if self.animatingMove?.id == moveID {
                 self.animatingMove = nil
             }
@@ -689,7 +704,7 @@ final class GameEngine {
     /// The board state to display (either historical or live).
     var displayBoard: ChessBoard {
         if let index = viewingMoveIndex {
-            if index < boardStates.count {
+            if index < boardStates.count && index < moveHistory.count {
                 // Show board AFTER the move at this index
                 return boardStates[index].applyingMove(moveHistory[index])
             }
@@ -791,9 +806,10 @@ final class GameEngine {
         aiTask?.cancel()
         aiTask = nil
         isAIThinking = false
-        gameResult = .resignation(winner: color.opposite)
+        let result = GameResult.resignation(winner: color.opposite)
+        gameResult = result
         isGameActive = false
-        statusMessage = gameResult?.displayText ?? "Game over"
+        statusMessage = result.displayText
         finalizeCurrentGame()
     }
 

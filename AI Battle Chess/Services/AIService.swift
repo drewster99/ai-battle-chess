@@ -1,11 +1,13 @@
 import Foundation
+import Observation
 import SwiftLLMKit
 
 // MARK: - AI Service
 
 /// Manages AI interactions for chess move generation, supporting all SwiftLLMKit providers and Apple Intelligence.
 @MainActor
-final class AIService: Observable {
+@Observable
+final class AIService {
     private let llmKit: LLMKitManager
 
     /// Maximum retries before forfeiting
@@ -244,20 +246,10 @@ final class AIService: Observable {
 
                 return (annotatedMove, penalties, retries, lastActivityLog)
 
-            } catch let error as AIError {
-                let penalty = AIPenalty(
-                    reason: "AI error: \(error.localizedDescription) (attempt \(attempt + 1))",
-                    severity: attempt >= AIService.maxRetries - 1 ? .critical : .major,
-                    timestamp: Date()
-                )
-                penalties.append(penalty)
-                retries += 1
-                if attempt >= AIService.maxRetries - 1 {
-                    throw error
-                }
             } catch {
+                let label = error is AIError ? "AI error" : "Network error"
                 let penalty = AIPenalty(
-                    reason: "Network error: \(error.localizedDescription) (attempt \(attempt + 1))",
+                    reason: "\(label): \(error.localizedDescription) (attempt \(attempt + 1))",
                     severity: attempt >= AIService.maxRetries - 1 ? .critical : .major,
                     timestamp: Date()
                 )
@@ -434,8 +426,8 @@ final class AIService: Observable {
             return String(match.output)
         }
 
-        // Try to find SAN pattern
-        let sanPattern = /[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?/
+        // Try to find SAN pattern (require word boundary to avoid matching substrings of longer text)
+        let sanPattern = /\b[KQRBN][a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?\b/
         if let match = cleaned.firstMatch(of: sanPattern) {
             return String(match.output)
         }

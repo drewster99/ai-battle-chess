@@ -76,16 +76,6 @@ struct MoveHistoryView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.green)
-            } else {
-                Button { engine.navigateNext() } label: {
-                    Image(systemName: "forward.fill")
-                }
-                .disabled(true)
-
-                Button { engine.navigateLast() } label: {
-                    Image(systemName: "forward.end.fill")
-                }
-                .disabled(true)
             }
         }
         .buttonStyle(.borderless)

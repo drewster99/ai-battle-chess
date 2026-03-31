@@ -47,7 +47,7 @@ struct ChessBoardView: View {
             HStack(spacing: 0) {
                 Color.clear.frame(width: 20, height: 20)
                 ForEach(0..<8, id: \.self) { file in
-                    Text(String(Character(UnicodeScalar(97 + file)!)))
+                    Text(String(Character(UnicodeScalar(97 + file) ?? UnicodeScalar(63))))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .frame(width: squareSize, height: 20)
@@ -158,8 +158,16 @@ struct ChessBoardView: View {
                         Button {
                             engine.selectPromotion(type)
                         } label: {
-                            let color = engine.board.activeColor
-                            let tempPiece = ChessPiece(color: color, type: type)
+                            // Use the piece color of the pawn that is promoting (the player
+                            // whose turn it was when promotion was triggered)
+                            let promoColor: PieceColor = {
+                                if let from = engine.pendingPromotion?.from,
+                                   let piece = engine.board.piece(at: from) {
+                                    return piece.color
+                                }
+                                return engine.board.activeColor
+                            }()
+                            let tempPiece = ChessPiece(color: promoColor, type: type)
                             PieceView(piece: tempPiece, size: squareSize * 1.2)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8)

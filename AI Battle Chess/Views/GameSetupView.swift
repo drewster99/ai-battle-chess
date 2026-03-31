@@ -195,10 +195,20 @@ struct GameSetupView: View {
 
                 Button("Load") {
                     engine.loadGame(pgn: pgnText)
-                    showLoadPGN = false
+                    if engine.errorMessage != nil {
+                        // Leave the sheet open so the user sees the error
+                    } else {
+                        showLoadPGN = false
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(pgnText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if let error = engine.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
         }
         .padding(24)

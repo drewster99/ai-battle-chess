@@ -60,18 +60,29 @@ struct MoveValidator: Sendable {
 
     // MARK: - Game State Detection
 
+    /// Returns true if the active color has at least one legal move.
+    /// Early-exits as soon as a single legal move is found, avoiding generating all moves.
+    static func hasAnyLegalMove(for board: ChessBoard) -> Bool {
+        for (piece, position) in board.allPieces(color: board.activeColor) {
+            if !legalMoves(for: piece, at: position, on: board).isEmpty {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Detects checkmate for the active color.
     static func isCheckmate(on board: ChessBoard) -> Bool {
         let color = board.activeColor
         guard isKingInCheck(color: color, on: board) else { return false }
-        return allLegalMoves(for: board).isEmpty
+        return !hasAnyLegalMove(for: board)
     }
 
     /// Detects stalemate for the active color.
     static func isStalemate(on board: ChessBoard) -> Bool {
         let color = board.activeColor
         guard !isKingInCheck(color: color, on: board) else { return false }
-        return allLegalMoves(for: board).isEmpty
+        return !hasAnyLegalMove(for: board)
     }
 
     /// Detects insufficient material (K vs K, K+B vs K, K+N vs K, K+B vs K+B same color).
@@ -218,8 +229,11 @@ struct MoveValidator: Sendable {
             let target = BoardPosition(file: position.file + df, rank: position.rank + dr)
             guard target.isValid else { continue }
             let targetPiece = board.piece(at: target)
-            if targetPiece == nil || targetPiece!.color != piece.color {
+            if let targetPiece {
+                guard targetPiece.color != piece.color else { continue }
                 moves.append(ChessMove(piece: piece, from: position, to: target, capturedPiece: targetPiece))
+            } else {
+                moves.append(ChessMove(piece: piece, from: position, to: target))
             }
         }
         return moves
@@ -258,8 +272,11 @@ struct MoveValidator: Sendable {
                 let target = BoardPosition(file: position.file + df, rank: position.rank + dr)
                 guard target.isValid else { continue }
                 let targetPiece = board.piece(at: target)
-                if targetPiece == nil || targetPiece!.color != piece.color {
+                if let targetPiece {
+                    guard targetPiece.color != piece.color else { continue }
                     moves.append(ChessMove(piece: piece, from: position, to: target, capturedPiece: targetPiece))
+                } else {
+                    moves.append(ChessMove(piece: piece, from: position, to: target))
                 }
             }
         }
