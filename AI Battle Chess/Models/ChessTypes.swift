@@ -244,6 +244,24 @@ enum GameMode: String, Codable, Sendable, CaseIterable {
     case aiVsAI = "AI vs AI"
 }
 
+// MARK: - Human Player
+
+/// A persistent human player profile.
+struct HumanPlayer: Codable, Identifiable, Equatable, Sendable {
+    let id: UUID
+    var name: String
+    let createdAt: Date
+    let isGuest: Bool
+
+    // Well-known ID for the built-in Guest player
+    // swiftlint:disable:next force_unwrapping
+    static let guestID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+
+    static var guest: HumanPlayer {
+        HumanPlayer(id: guestID, name: "Guest", createdAt: .distantPast, isGuest: true)
+    }
+}
+
 // MARK: - Player Configuration
 
 struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
@@ -253,6 +271,7 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
     var aiConfigurationID: UUID?  // References ModelConfiguration.id from SwiftLLMKit
     var useAppleIntelligence: Bool
     var color: PieceColor
+    var humanPlayerID: UUID?  // References HumanPlayer.id for human players
 
     init(
         name: String = "Player",
@@ -260,6 +279,7 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
         aiConfigurationID: UUID? = nil,
         useAppleIntelligence: Bool = false,
         color: PieceColor = .white,
+        humanPlayerID: UUID? = nil,
         id: UUID = UUID()
     ) {
         self.id = id
@@ -268,6 +288,7 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
         self.aiConfigurationID = aiConfigurationID
         self.useAppleIntelligence = useAppleIntelligence
         self.color = color
+        self.humanPlayerID = humanPlayerID
     }
 }
 
@@ -314,6 +335,8 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
     let endTime: Date
     let whitePlayerName: String
     let blackPlayerName: String
+    let whitePlayerID: UUID?  // HumanPlayer.id for human players, nil for AI or legacy records
+    let blackPlayerID: UUID?  // HumanPlayer.id for human players, nil for AI or legacy records
     let gameMode: GameMode
     let result: GameResult
     let moveCount: Int

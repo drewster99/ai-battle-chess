@@ -8,6 +8,7 @@ struct AIBattleChessApp: App {
         keychainServicePrefix: "com.drew.ai-battle-chess"
     )
     @State private var gameHistoryManager = GameHistoryManager()
+    @State private var humanPlayerManager = HumanPlayerManager()
     @State private var engine: GameEngine?
 
     var body: some Scene {
@@ -23,7 +24,8 @@ struct AIBattleChessApp: App {
             .onAppear {
                 llmKit.load()
                 gameHistoryManager.loadAll()
-                let gameEngine = GameEngine(llmKit: llmKit, gameHistoryManager: gameHistoryManager)
+                humanPlayerManager.loadAll()
+                let gameEngine = GameEngine(llmKit: llmKit, gameHistoryManager: gameHistoryManager, humanPlayerManager: humanPlayerManager)
                 engine = gameEngine
 
                 // Refresh model catalog and auto-create configurations

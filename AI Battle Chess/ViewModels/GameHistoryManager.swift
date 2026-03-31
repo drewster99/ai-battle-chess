@@ -212,4 +212,18 @@ final class GameHistoryManager {
     func totalGamesForPlayer(name: String) -> Int {
         gameRecords.count(where: { $0.whitePlayerName == name || $0.blackPlayerName == name })
     }
+
+    /// Returns the total number of games for a player, matching by ID first, then by name.
+    ///
+    /// - Parameters:
+    ///   - id: The player's stable UUID (from HumanPlayer.id), or nil for AI/legacy.
+    ///   - name: The player's display name as a fallback.
+    /// - Returns: The count of matching games.
+    func totalGamesForPlayer(id: UUID?, name: String) -> Int {
+        guard let id else { return totalGamesForPlayer(name: name) }
+        return gameRecords.count(where: {
+            $0.whitePlayerID == id || $0.blackPlayerID == id ||
+            $0.whitePlayerName == name || $0.blackPlayerName == name
+        })
+    }
 }

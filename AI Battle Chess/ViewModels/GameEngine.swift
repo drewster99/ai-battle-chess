@@ -66,15 +66,17 @@ final class GameEngine {
     private let appleIntelligenceService: AppleIntelligenceService?
     let llmKit: LLMKitManager
     let gameHistoryManager: GameHistoryManager
+    let humanPlayerManager: HumanPlayerManager
     private var aiTask: Task<Void, Never>? = nil
     private var animationTask: Task<Void, Never>? = nil
     private var gameFinalized: Bool = false
 
     // MARK: - Init
 
-    init(llmKit: LLMKitManager, gameHistoryManager: GameHistoryManager) {
+    init(llmKit: LLMKitManager, gameHistoryManager: GameHistoryManager, humanPlayerManager: HumanPlayerManager) {
         self.llmKit = llmKit
         self.gameHistoryManager = gameHistoryManager
+        self.humanPlayerManager = humanPlayerManager
         self.aiService = AIService(llmKit: llmKit)
         if #available(macOS 26.0, *) {
             self.appleIntelligenceService = AppleIntelligenceService()
@@ -217,6 +219,8 @@ final class GameEngine {
             endTime: Date(),
             whitePlayerName: whitePlayer.name,
             blackPlayerName: blackPlayer.name,
+            whitePlayerID: whitePlayer.isAI ? nil : whitePlayer.humanPlayerID,
+            blackPlayerID: blackPlayer.isAI ? nil : blackPlayer.humanPlayerID,
             gameMode: gameMode,
             result: result,
             moveCount: moveHistory.count,

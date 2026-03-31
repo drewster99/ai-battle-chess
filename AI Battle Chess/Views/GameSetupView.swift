@@ -6,14 +6,19 @@ import SwiftLLMKit
 struct GameSetupView: View {
     @Bindable var engine: GameEngine
     @Environment(\.dismiss) private var dismiss
-    @State private var whitePlayerName: String = "Player"
+    @State private var whitePlayerName: String = "Guest"
     @State private var blackPlayerName: String = "AI Opponent"
     @State private var whiteIsAI: Bool = false
     @State private var blackIsAI: Bool = true
     @State private var whiteAISelection: AISelection? = nil
     @State private var blackAISelection: AISelection? = nil
+    @State private var whiteHumanPlayerID: UUID = HumanPlayer.guestID
+    @State private var blackHumanPlayerID: UUID = HumanPlayer.guestID
     @State private var showLoadPGN: Bool = false
     @State private var showProviderSettings: Bool = false
+    @State private var showAddPlayer: Bool = false
+    @State private var newPlayerName: String = ""
+    @State private var addingPlayerForColor: PieceColor? = nil
     @State private var pgnText: String = ""
 
     private var configurations: [ModelConfiguration] {
@@ -53,7 +58,8 @@ struct GameSetupView: View {
                     color: .white,
                     playerName: $whitePlayerName,
                     isAI: $whiteIsAI,
-                    aiSelection: $whiteAISelection
+                    aiSelection: $whiteAISelection,
+                    humanPlayerID: $whiteHumanPlayerID
                 )
 
                 Divider()
@@ -64,7 +70,8 @@ struct GameSetupView: View {
                     color: .black,
                     playerName: $blackPlayerName,
                     isAI: $blackIsAI,
-                    aiSelection: $blackAISelection
+                    aiSelection: $blackAISelection,
+                    humanPlayerID: $blackHumanPlayerID
                 )
             }
 
@@ -101,6 +108,24 @@ struct GameSetupView: View {
         .sheet(isPresented: $showProviderSettings) {
             ProviderSettingsView(llmKit: engine.llmKit)
         }
+        .alert("New Player", isPresented: $showAddPlayer) {
+            TextField("Name", text: $newPlayerName)
+            Button("Add") {
+                let trimmed = newPlayerName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                let newPlayer = engine.humanPlayerManager.addPlayer(name: trimmed)
+                if addingPlayerForColor == .white {
+                    whiteHumanPlayerID = newPlayer.id
+                    whitePlayerName = newPlayer.name
+                } else {
+                    blackHumanPlayerID = newPlayer.id
+                    blackPlayerName = newPlayer.name
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enter a name for the new player.")
+        }
     }
 
     // MARK: - Player Setup
@@ -110,7 +135,8 @@ struct GameSetupView: View {
         color: PieceColor,
         playerName: Binding<String>,
         isAI: Binding<Bool>,
-        aiSelection: Binding<AISelection?>
+        aiSelection: Binding<AISelection?>,
+        humanPlayerID: Binding<UUID>
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -130,11 +156,16 @@ struct GameSetupView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
 
-            TextField("Player Name", text: playerName)
-                .textFieldStyle(.roundedBorder)
-
             if isAI.wrappedValue {
+                TextField("Player Name", text: playerName)
+                    .textFieldStyle(.roundedBorder)
                 aiModelPicker(selection: aiSelection)
+            } else {
+                humanPlayerPicker(
+                    selectedPlayerID: humanPlayerID,
+                    playerName: playerName,
+                    color: color
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -145,11 +176,55 @@ struct GameSetupView: View {
         }
         .onChange(of: isAI.wrappedValue) { _, nowAI in
             if !nowAI {
-                playerName.wrappedValue = "Player"
+                // Switching to human — set name from selected human player
+                let selectedID = humanPlayerID.wrappedValue
+                if let player = engine.humanPlayerManager.player(byID: selectedID) {
+                    playerName.wrappedValue = player.name
+                } else {
+                    playerName.wrappedValue = "Guest"
+                }
             } else if let selection = aiSelection.wrappedValue {
                 playerName.wrappedValue = aiDisplayName(for: selection)
             } else {
                 playerName.wrappedValue = "AI Opponent"
+            }
+        }
+    }
+
+    // MARK: - Human Player Picker
+
+    private func humanPlayerPicker(
+        selectedPlayerID: Binding<UUID>,
+        playerName: Binding<String>,
+        color: PieceColor
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Player")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Picker("Player", selection: selectedPlayerID) {
+                    ForEach(engine.humanPlayerManager.players) { player in
+                        Text(player.name).tag(player.id)
+                    }
+                }
+                .labelsHidden()
+                .onChange(of: selectedPlayerID.wrappedValue) { _, newID in
+                    if let player = engine.humanPlayerManager.player(byID: newID) {
+                        playerName.wrappedValue = player.name
+                    }
+                }
+
+                Button {
+                    addingPlayerForColor = color
+                    newPlayerName = ""
+                    showAddPlayer = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
     }
@@ -259,7 +334,8 @@ struct GameSetupView: View {
             name: whitePlayerName,
             isAI: whiteIsAI,
             aiSelection: whiteAISelection,
-            color: .white
+            color: .white,
+            humanPlayerID: whiteHumanPlayerID
         )
 
         // Build black player config
@@ -267,7 +343,8 @@ struct GameSetupView: View {
             name: blackPlayerName,
             isAI: blackIsAI,
             aiSelection: blackAISelection,
-            color: .black
+            color: .black,
+            humanPlayerID: blackHumanPlayerID
         )
 
         engine.whitePlayer = whiteConfig
@@ -286,8 +363,8 @@ struct GameSetupView: View {
         dismiss()
     }
 
-    private func buildPlayerConfig(name: String, isAI: Bool, aiSelection: AISelection?, color: PieceColor) -> PlayerConfig {
-        var config = PlayerConfig(name: name, isAI: isAI, color: color)
+    private func buildPlayerConfig(name: String, isAI: Bool, aiSelection: AISelection?, color: PieceColor, humanPlayerID: UUID?) -> PlayerConfig {
+        var config = PlayerConfig(name: name, isAI: isAI, color: color, humanPlayerID: isAI ? nil : humanPlayerID)
         if isAI, let selection = aiSelection {
             switch selection {
             case .appleIntelligence:
