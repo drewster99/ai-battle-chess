@@ -101,6 +101,7 @@ final class AIService {
 
         ### Basic Rules:
         1. **Movement:**
+        - No pieces can move through or over other pieces on the way to its destination, with the exception of the Knight, which essentially teleports.
         - **King:** Moves one square in any direction (horizontal, vertical or diagonal). The king cannot move to a square that puts it in "check", meaning it is under direct threat from an opponent's piece.
         - **Queen:** Moves any number of squares in any direction
         (horizontal, vertical, or diagonal).

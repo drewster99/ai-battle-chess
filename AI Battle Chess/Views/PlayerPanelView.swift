@@ -339,7 +339,7 @@ struct PlayerPanelView: View {
                         Text(thinking)
                             .font(.caption2)
                             .foregroundStyle(.blue)
-                            .lineLimit(3)
+                            .textSelection(.enabled)
                     }
 
                     // Move with status indicator

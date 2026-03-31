@@ -126,6 +126,9 @@ struct GameSetupView: View {
         } message: {
             Text("Enter a name for the new player.")
         }
+        .onAppear {
+            restoreLastSetup()
+        }
     }
 
     // MARK: - Player Setup
@@ -359,6 +362,7 @@ struct GameSetupView: View {
             engine.gameMode = .playerVsPlayer
         }
 
+        saveLastSetup()
         engine.startNewGame()
         dismiss()
     }
@@ -374,5 +378,113 @@ struct GameSetupView: View {
             }
         }
         return config
+    }
+
+    // MARK: - Last Player Setup Persistence
+
+    /// Saved state for one side of the board.
+    private struct SavedSideSetup: Codable {
+        let isAI: Bool
+        let playerName: String
+        let humanPlayerID: String
+        let isAppleIntelligence: Bool
+        let aiConfigID: String?
+    }
+
+    private static let lastWhiteKey = "lastSetup.white"
+    private static let lastBlackKey = "lastSetup.black"
+
+    private func saveLastSetup() {
+        let whiteSide = SavedSideSetup(
+            isAI: whiteIsAI,
+            playerName: whitePlayerName,
+            humanPlayerID: whiteHumanPlayerID.uuidString,
+            isAppleIntelligence: whiteAISelection == .appleIntelligence,
+            aiConfigID: whiteAISelection.flatMap { selection -> String? in
+                if case .llmConfig(let id) = selection { return id.uuidString }
+                return nil
+            }
+        )
+        let blackSide = SavedSideSetup(
+            isAI: blackIsAI,
+            playerName: blackPlayerName,
+            humanPlayerID: blackHumanPlayerID.uuidString,
+            isAppleIntelligence: blackAISelection == .appleIntelligence,
+            aiConfigID: blackAISelection.flatMap { selection -> String? in
+                if case .llmConfig(let id) = selection { return id.uuidString }
+                return nil
+            }
+        )
+
+        do {
+            let encoder = JSONEncoder()
+            let whiteData = try encoder.encode(whiteSide)
+            let blackData = try encoder.encode(blackSide)
+            UserDefaults.standard.set(whiteData, forKey: Self.lastWhiteKey)
+            UserDefaults.standard.set(blackData, forKey: Self.lastBlackKey)
+        } catch {
+            print("[GameSetupView] Failed to save last setup: \(error)")
+        }
+    }
+
+    private func restoreLastSetup() {
+        let decoder = JSONDecoder()
+
+        if let whiteData = UserDefaults.standard.data(forKey: Self.lastWhiteKey) {
+            do {
+                let saved = try decoder.decode(SavedSideSetup.self, from: whiteData)
+                applySavedSetup(saved, isAI: &whiteIsAI, playerName: &whitePlayerName,
+                                humanPlayerID: &whiteHumanPlayerID, aiSelection: &whiteAISelection)
+            } catch {
+                print("[GameSetupView] Failed to decode white setup: \(error)")
+            }
+        }
+
+        if let blackData = UserDefaults.standard.data(forKey: Self.lastBlackKey) {
+            do {
+                let saved = try decoder.decode(SavedSideSetup.self, from: blackData)
+                applySavedSetup(saved, isAI: &blackIsAI, playerName: &blackPlayerName,
+                                humanPlayerID: &blackHumanPlayerID, aiSelection: &blackAISelection)
+            } catch {
+                print("[GameSetupView] Failed to decode black setup: \(error)")
+            }
+        }
+    }
+
+    private func applySavedSetup(
+        _ saved: SavedSideSetup,
+        isAI: inout Bool,
+        playerName: inout String,
+        humanPlayerID: inout UUID,
+        aiSelection: inout AISelection?
+    ) {
+        isAI = saved.isAI
+
+        if saved.isAI {
+            // Restore AI selection, validating that the config still exists
+            if saved.isAppleIntelligence && appleIntelligenceAvailable {
+                aiSelection = .appleIntelligence
+                playerName = "Apple Intelligence"
+            } else if let idStr = saved.aiConfigID,
+                      let configID = UUID(uuidString: idStr),
+                      configurations.contains(where: { $0.id == configID }) {
+                aiSelection = .llmConfig(configID)
+                playerName = aiDisplayName(for: .llmConfig(configID))
+            } else {
+                // Saved config no longer exists — clear selection
+                aiSelection = nil
+                playerName = saved.playerName
+            }
+        } else {
+            // Restore human player, validating they still exist
+            if let id = UUID(uuidString: saved.humanPlayerID),
+               let player = engine.humanPlayerManager.player(byID: id) {
+                humanPlayerID = id
+                playerName = player.name
+            } else {
+                humanPlayerID = HumanPlayer.guestID
+                playerName = engine.humanPlayerManager.player(byID: HumanPlayer.guestID)?.name ?? "Guest"
+            }
+        }
     }
 }
