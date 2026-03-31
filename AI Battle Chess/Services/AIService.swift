@@ -170,13 +170,24 @@ final class AIService {
         print(userMessage)
         print("[AIService] --- END PROMPTS ---")
 
-        // Build conversation history — corrections append as assistant + user turns
+        // Build conversation history — corrections append as assistant + user turns.
+        // Reset every N turns to avoid context window overflow.
         var conversationMessages: [ConversationMessage] = [
             ConversationMessage(role: .user, content: userMessage)
         ]
+        var turnsSinceReset = 0
 
         for attempt in 0..<AIService.maxRetries {
             do {
+                // Reset conversation if we've accumulated too many correction turns
+                if turnsSinceReset >= AIConstants.conversationResetInterval {
+                    print("[AIService] Resetting conversation (hit \(AIConstants.conversationResetInterval)-turn limit)")
+                    conversationMessages = [
+                        ConversationMessage(role: .user, content: userMessage)
+                    ]
+                    turnsSinceReset = 0
+                }
+
                 let preparedRequest = try llmKit.prepareRequest(for: configurationID)
 
                 let body = buildConversationBody(
@@ -260,6 +271,7 @@ final class AIService {
                     )
                     penalties.append(penalty)
                     retries += 1
+                    turnsSinceReset += 1
                     continue
                 }
 
@@ -285,6 +297,7 @@ final class AIService {
                     )
                     penalties.append(penalty)
                     retries += 1
+                    turnsSinceReset += 1
                     continue
                 }
 
@@ -532,7 +545,8 @@ final class AIService {
 
 /// Nonisolated constants for AI configuration.
 enum AIConstants {
-    static let maxRetries = 25
+    static let maxRetries = 100
+    static let conversationResetInterval = 5
 }
 
 // MARK: - AI Service Failure

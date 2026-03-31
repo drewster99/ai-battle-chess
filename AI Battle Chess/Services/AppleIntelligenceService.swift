@@ -58,15 +58,21 @@ final class AppleIntelligenceService {
         print("[AppleIntelligence] --- END PROMPTS ---")
 
         // Session for conversation — corrections accumulate in history.
-        // Recreated on actual errors to start fresh.
+        // Recreated every N turns or on actual errors to avoid context overflow.
         var session = LanguageModelSession(instructions: systemPrompt)
-
-        // The prompt for the current attempt: first time it's the board state,
-        // subsequent times it's a correction message
         var currentPrompt = userPrompt
+        var turnsSinceReset = 0
 
         for attempt in 0..<AIService.maxRetries {
             do {
+                // Reset conversation if we've accumulated too many correction turns
+                if turnsSinceReset >= AIConstants.conversationResetInterval {
+                    print("[AppleIntelligence] Resetting session (hit \(AIConstants.conversationResetInterval)-turn limit)")
+                    session = LanguageModelSession(instructions: systemPrompt)
+                    currentPrompt = userPrompt
+                    turnsSinceReset = 0
+                }
+
                 print("[AppleIntelligence] --- ATTEMPT \(attempt + 1)/\(AIService.maxRetries) ---")
                 if attempt > 0 {
                     print("[AppleIntelligence] Correction prompt: \(currentPrompt)")
@@ -134,6 +140,7 @@ final class AppleIntelligenceService {
                         timestamp: Date()
                     ))
                     retries += 1
+                    turnsSinceReset += 1
                     continue
                 }
 
@@ -156,6 +163,7 @@ final class AppleIntelligenceService {
                         timestamp: Date()
                     ))
                     retries += 1
+                    turnsSinceReset += 1
                     continue
                 }
 
@@ -191,6 +199,7 @@ final class AppleIntelligenceService {
                 // On error, reset to a fresh session for next attempt
                 session = LanguageModelSession(instructions: systemPrompt)
                 currentPrompt = userPrompt
+                turnsSinceReset = 0
             }
         }
 
