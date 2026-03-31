@@ -99,7 +99,8 @@ final class AppleIntelligenceService {
                 let moveText: String
                 var moveComment: String? = nil
                 if let openBrace = rawMove.range(of: "{"),
-                   let closeBrace = rawMove.range(of: "}") {
+                   let closeBrace = rawMove.range(of: "}"),
+                   closeBrace.lowerBound >= openBrace.upperBound {
                     moveComment = String(rawMove[openBrace.upperBound..<closeBrace.lowerBound]).trimmingCharacters(in: .whitespaces)
                     moveText = String(rawMove[rawMove.startIndex..<openBrace.lowerBound]).trimmingCharacters(in: .whitespaces)
                 } else {
@@ -206,6 +207,20 @@ final class AppleIntelligenceService {
                 print("[AppleIntelligence] ====== END REQUEST ======")
 
                 return (.move(annotatedMove), penalties, retries, lastActivityLog)
+            } catch is CancellationError {
+                throw AIServiceFailure(
+                    underlyingError: CancellationError(),
+                    penalties: penalties,
+                    retries: retries,
+                    lastActivityLog: lastActivityLog
+                )
+            } catch where Task.isCancelled {
+                throw AIServiceFailure(
+                    underlyingError: CancellationError(),
+                    penalties: penalties,
+                    retries: retries,
+                    lastActivityLog: lastActivityLog
+                )
             } catch {
                 print("[AppleIntelligence] ERROR attempt \(attempt + 1): \(type(of: error)) — \(error.localizedDescription)")
 

@@ -102,10 +102,10 @@ struct PGNFormatter {
 
         // Result
         if let result {
-            pgn += " \(result.pgnResult)"
             if let comment = result.pgnResultComment {
                 pgn += " {\(comment)}"
             }
+            pgn += " \(result.pgnResult)"
         }
 
         return pgn
@@ -153,7 +153,7 @@ struct PGNFormatter {
             return (BoardPosition(file: 4, rank: rank), BoardPosition(file: 2, rank: rank), nil)
         }
 
-        // Promotion
+        // Promotion (with = separator, e.g. "e8=Q")
         var promotion: PieceType? = nil
         if let eqIndex = s.firstIndex(of: "=") {
             let promoCharIndex = s.index(after: eqIndex)
@@ -161,6 +161,21 @@ struct PGNFormatter {
                 promotion = pieceTypeFromChar(Character(s[promoCharIndex].lowercased()))
             }
             s = String(s[s.startIndex..<eqIndex])
+        }
+
+        // Promotion without = separator (e.g. "e8Q")
+        if promotion == nil, let lastChar = s.last, "QRBNqrbn".contains(String(lastChar)) {
+            let withoutLast = String(s.dropLast())
+            if withoutLast.count >= 2 {
+                let potentialDest = String(withoutLast.suffix(2))
+                if let dest = BoardPosition(algebraic: potentialDest) {
+                    let promoRank = board.activeColor == .white ? 7 : 0
+                    if dest.rank == promoRank {
+                        promotion = pieceTypeFromChar(Character(lastChar.lowercased()))
+                        s = withoutLast
+                    }
+                }
+            }
         }
 
         // Remove capture symbol

@@ -133,6 +133,7 @@ final class HumanPlayerManager {
     /// Guest first, then alphabetical by name.
     private func sortPlayers(_ list: [HumanPlayer]) -> [HumanPlayer] {
         list.sorted { a, b in
+            if a.isGuest && b.isGuest { return false }
             if a.isGuest { return true }
             if b.isGuest { return false }
             return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending

@@ -197,10 +197,9 @@ struct ContentView: View {
             let halfMoveClock = engine.displayBoard.halfMoveClock
             if halfMoveClock > 0 {
                 Divider().frame(height: 14)
-                let movePairs = halfMoveClock / 2
-                Text("50-move: \(movePairs)/50")
+                Text("50-move: \(halfMoveClock)/100")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(movePairs >= 40 ? .orange : .secondary)
+                    .foregroundStyle(halfMoveClock >= 80 ? .orange : .secondary)
             }
 
             // Threefold repetition counter (only show when position repeated)

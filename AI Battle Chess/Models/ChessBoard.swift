@@ -58,6 +58,25 @@ struct ChessBoard: Equatable, Sendable {
                 }
             }
         }
+        // FIDE Article 9.2: en passant target only matters when a pawn can actually capture
+        let relevantEnPassant: BoardPosition?
+        if let ep = enPassantTarget {
+            // The capturing pawn must be on the rank adjacent to the ep target, at file ±1
+            let capturingPawnRank = activeColor == .white ? ep.rank - 1 : ep.rank + 1
+            let hasCapturingPawn = [-1, 1].contains(where: { df in
+                let file = ep.file + df
+                guard file >= 0, file < 8, capturingPawnRank >= 0, capturingPawnRank < 8 else { return false }
+                if let piece = squares[file][capturingPawnRank],
+                   piece.type == .pawn, piece.color == activeColor {
+                    return true
+                }
+                return false
+            })
+            relevantEnPassant = hasCapturingPawn ? ep : nil
+        } else {
+            relevantEnPassant = nil
+        }
+
         return PositionKey(
             pieceLayout: encoded,
             activeColor: activeColor,
@@ -65,7 +84,7 @@ struct ChessBoard: Equatable, Sendable {
             whiteCanCastleQueenside: whiteCanCastleQueenside,
             blackCanCastleKingside: blackCanCastleKingside,
             blackCanCastleQueenside: blackCanCastleQueenside,
-            enPassantTarget: enPassantTarget
+            enPassantTarget: relevantEnPassant
         )
     }
 

@@ -87,8 +87,8 @@ final class GameHistoryManager {
             let data = try encoder.encode(record)
             try data.write(to: fileURL, options: .atomic)
         } catch {
-            print("[GameHistoryManager] Failed to save game \(record.id): \(error)")
-            return
+            print("[GameHistoryManager] Failed to save game \(record.id) to disk: \(error)")
+            // Still insert into memory so the game isn't silently lost
         }
 
         // Insert while maintaining descending startTime order
@@ -123,8 +123,14 @@ final class GameHistoryManager {
 
             for subdirectory in subdirectories {
                 // Skip non-directory entries
-                let resourceValues = try? subdirectory.resourceValues(forKeys: [.isDirectoryKey])
-                guard resourceValues?.isDirectory == true else { continue }
+                let resourceValues: URLResourceValues
+                do {
+                    resourceValues = try subdirectory.resourceValues(forKeys: [.isDirectoryKey])
+                } catch {
+                    print("[GameHistoryManager] Failed to read resource values for \(subdirectory.path): \(error)")
+                    continue
+                }
+                guard resourceValues.isDirectory == true else { continue }
 
                 let gameFile = subdirectory.appendingPathComponent(Self.gameFileName)
                 guard fileManager.fileExists(atPath: gameFile.path) else {
@@ -222,8 +228,10 @@ final class GameHistoryManager {
     func totalGamesForPlayer(id: UUID?, name: String) -> Int {
         guard let id else { return totalGamesForPlayer(name: name) }
         return gameRecords.count(where: {
+            // Match by ID first; fall back to name only for legacy records without IDs
             $0.whitePlayerID == id || $0.blackPlayerID == id ||
-            $0.whitePlayerName == name || $0.blackPlayerName == name
+            ($0.whitePlayerID == nil && $0.whitePlayerName == name) ||
+            ($0.blackPlayerID == nil && $0.blackPlayerName == name)
         })
     }
 }

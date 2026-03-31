@@ -213,8 +213,7 @@ final class AIService {
 
         // 50-move rule counter
         if board.halfMoveClock > 0 {
-            let fullMoves = board.halfMoveClock / 2
-            prompt += "\n50-move rule: \(fullMoves)/50 consecutive move pairs without a pawn move or capture.\n"
+            prompt += "\n50-move rule: \(board.halfMoveClock)/100 half-moves without a pawn move or capture.\n"
         }
 
         // Threefold repetition counter
@@ -483,6 +482,21 @@ final class AIService {
 
                 return (.move(annotatedMove), penalties, retries, lastActivityLog)
 
+            } catch is CancellationError {
+                // Immediately propagate cancellation instead of retrying
+                throw AIServiceFailure(
+                    underlyingError: CancellationError(),
+                    penalties: penalties,
+                    retries: retries,
+                    lastActivityLog: lastActivityLog
+                )
+            } catch where Task.isCancelled {
+                throw AIServiceFailure(
+                    underlyingError: CancellationError(),
+                    penalties: penalties,
+                    retries: retries,
+                    lastActivityLog: lastActivityLog
+                )
             } catch {
                 let label = error is AIError ? "AI error" : "Network error"
                 print("[AIService] ERROR attempt \(attempt + 1): \(label) — \(error.localizedDescription)")
@@ -582,10 +596,10 @@ final class AIService {
 
         switch providerType {
         case .anthropic:
-            if let content = json["content"] as? [[String: Any]],
-               let firstBlock = content.first,
-               let blockText = firstBlock["text"] as? String {
-                text = blockText
+            if let content = json["content"] as? [[String: Any]] {
+                // Find the text block — skip thinking blocks from extended thinking mode
+                let textBlock = content.first(where: { ($0["type"] as? String) == "text" })
+                text = textBlock?["text"] as? String
             } else {
                 text = nil
             }
@@ -597,6 +611,20 @@ final class AIService {
                let firstPart = parts.first,
                let partText = firstPart["text"] as? String {
                 text = partText
+            } else {
+                text = nil
+            }
+        case .ollama:
+            // Ollama native API returns {"message":{"content":"..."}}
+            if let message = json["message"] as? [String: Any],
+               let content = message["content"] as? String {
+                text = content
+            } else if let choices = json["choices"] as? [[String: Any]],
+                      let first = choices.first,
+                      let message = first["message"] as? [String: Any],
+                      let content = message["content"] as? String {
+                // Fallback to OpenAI-compatible format
+                text = content
             } else {
                 text = nil
             }
@@ -714,7 +742,8 @@ final class AIService {
         // Extract comment: "e2e4 { capture knight }" → move="e2e4", comment="capture knight"
         var comment: String? = nil
         if let openBrace = cleaned.range(of: "{"),
-           let closeBrace = cleaned.range(of: "}") {
+           let closeBrace = cleaned.range(of: "}"),
+           closeBrace.lowerBound >= openBrace.upperBound {
             let commentContent = String(cleaned[openBrace.upperBound..<closeBrace.lowerBound])
                 .trimmingCharacters(in: .whitespaces)
             if !commentContent.isEmpty {

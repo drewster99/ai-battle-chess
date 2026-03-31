@@ -186,8 +186,8 @@ struct PlayerPanelView: View {
                 }
             }
 
-            // Show pieces captured BY this player (i.e., opponent's missing pieces)
-            let captured = engine.displayBoard.capturedPieces(for: color.opposite)
+            // Show pieces captured BY this player (from move history)
+            let captured = engine.capturedPieces(for: color.opposite)
             if captured.isEmpty {
                 Text("None")
                     .font(.caption)

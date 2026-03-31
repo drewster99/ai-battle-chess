@@ -27,6 +27,7 @@ struct ProviderSettingsView: View {
     @State private var endpoints: [String: String] = [:]
     @State private var isDiscovering = false
     @State private var discoveryError: String? = nil
+    @State private var discoveryTask: Task<Void, Never>? = nil
 
     // Compile-time constant URLs -- force-unwrap is acceptable here.
     // swiftlint:disable force_unwrapping
@@ -93,6 +94,9 @@ struct ProviderSettingsView: View {
         .frame(width: 700, height: 600)
         .onAppear {
             loadExistingKeys()
+        }
+        .onDisappear {
+            discoveryTask?.cancel()
         }
     }
 
@@ -280,8 +284,10 @@ struct ProviderSettingsView: View {
         isDiscovering = true
         discoveryError = nil
 
-        Task {
+        discoveryTask?.cancel()
+        discoveryTask = Task {
             await llmKit.forceRefresh()
+            guard !Task.isCancelled else { return }
             llmKit.autoCreateConfigurations()
             isDiscovering = false
 

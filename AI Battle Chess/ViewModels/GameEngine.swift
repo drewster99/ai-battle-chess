@@ -99,6 +99,24 @@ final class GameEngine {
         return durations.reduce(0, +) / Double(durations.count)
     }
 
+    /// Captured pieces for a given color, computed from actual move history.
+    /// Returns piece types captured BY the opponent (i.e., pieces of `color` that were taken).
+    func capturedPieces(for color: PieceColor) -> [PieceType] {
+        let historySlice: ArraySlice<ChessMove>
+        if let viewingIndex = viewingMoveIndex {
+            historySlice = moveHistory.prefix(viewingIndex + 1)
+        } else {
+            historySlice = moveHistory[...]
+        }
+
+        return historySlice
+            .compactMap { move -> PieceType? in
+                guard let captured = move.capturedPiece, captured.color == color else { return nil }
+                return captured.type
+            }
+            .sorted { $0.value > $1.value }
+    }
+
     /// Number of times the current board position has occurred (for threefold repetition tracking).
     var currentPositionRepetitionCount: Int {
         positionCounts[board.positionKey] ?? 1
@@ -144,6 +162,11 @@ final class GameEngine {
     // MARK: - New Game
 
     func startNewGame() {
+        // If viewing a past game, restore live state before finalizing
+        if isViewingPastGame {
+            restoreLiveGameSnapshot()
+        }
+
         // Finalize the current game if it was active
         finalizeCurrentGame()
 
@@ -460,7 +483,7 @@ final class GameEngine {
                 }
 
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, gameID == self.currentGameID else { return }
 
                 isAIThinking = false
                 currentAIColor = nil
@@ -639,6 +662,10 @@ final class GameEngine {
         let currentAIActivity: [PieceColor: AIActivityLog]
         let positionCounts: [ChessBoard.PositionKey: Int]
         let moveSANCache: [String]
+        let gameFinalized: Bool
+        let whitePlayer: PlayerConfig
+        let blackPlayer: PlayerConfig
+        let gameMode: GameMode
     }
 
     private var liveGameSnapshot: LiveGameSnapshot? = nil
@@ -693,7 +720,11 @@ final class GameEngine {
             currentGameID: currentGameID,
             currentAIActivity: currentAIActivity,
             positionCounts: positionCounts,
-            moveSANCache: moveSANCache
+            moveSANCache: moveSANCache,
+            gameFinalized: gameFinalized,
+            whitePlayer: whitePlayer,
+            blackPlayer: blackPlayer,
+            gameMode: gameMode
         )
     }
 
@@ -714,6 +745,10 @@ final class GameEngine {
         currentAIActivity = snapshot.currentAIActivity
         positionCounts = snapshot.positionCounts
         moveSANCache = snapshot.moveSANCache
+        gameFinalized = snapshot.gameFinalized
+        whitePlayer = snapshot.whitePlayer
+        blackPlayer = snapshot.blackPlayer
+        gameMode = snapshot.gameMode
         viewingMoveIndex = nil
         animatingMove = nil
         animatingFileDelta = 0
@@ -838,6 +873,8 @@ final class GameEngine {
         guard isGameActive else { return }
         aiTask?.cancel()
         aiTask = nil
+        animationTask?.cancel()
+        animationTask = nil
         isAIThinking = false
         currentAIColor = nil
         let result = GameResult.resignation(winner: color.opposite)

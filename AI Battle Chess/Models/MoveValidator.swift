@@ -137,7 +137,7 @@ struct MoveValidator: Sendable {
     }
 
     /// Detects any game-ending condition and returns the result.
-    static func detectGameResult(on board: ChessBoard, positionCounts: [ChessBoard.PositionKey: Int] = [:]) -> GameResult? {
+    static func detectGameResult(on board: ChessBoard, positionCounts: [ChessBoard.PositionKey: Int]) -> GameResult? {
         if isCheckmate(on: board) {
             return .checkmate(winner: board.activeColor.opposite)
         }
@@ -347,6 +347,7 @@ struct MoveValidator: Sendable {
         case .queen:
             return canSlideAttack(from: from, to: target, directions: queenDirections, on: board)
         case .king:
+            guard from != target else { return false }
             return abs(target.file - from.file) <= 1 && abs(target.rank - from.rank) <= 1
         }
     }
