@@ -46,6 +46,9 @@ struct ProviderSettingsView: View {
         ProviderTemplate(id: "xai", name: "xAI", apiType: .xAI,
                         defaultEndpoint: URL(string: "https://api.x.ai/v1")!,
                         requiresAPIKey: true),
+        ProviderTemplate(id: "deepseek", name: "DeepSeek", apiType: .openAICompatible,
+                        defaultEndpoint: URL(string: "https://api.deepseek.com/v1")!,
+                        requiresAPIKey: true),
         ProviderTemplate(id: "ollama", name: "Ollama (Local)", apiType: .ollama,
                         defaultEndpoint: URL(string: "http://localhost:11434")!,
                         requiresAPIKey: false),
@@ -249,11 +252,22 @@ struct ProviderSettingsView: View {
         do {
             if llmKit.providers.contains(where: { $0.id == template.id }) {
                 try llmKit.updateProvider(provider, apiKey: apiKey.isEmpty ? nil : apiKey)
+                print("[ProviderSettings] Updated provider '\(template.name)' (key length: \(apiKey.count))")
             } else {
                 try llmKit.addProvider(provider, apiKey: apiKey)
+                print("[ProviderSettings] Added provider '\(template.name)' (key length: \(apiKey.count))")
             }
+
+            // Verify the key was saved by reading it back
+            if let savedKey = llmKit.apiKey(for: template.id) {
+                print("[ProviderSettings] Keychain verify: key retrieved OK (length: \(savedKey.count))")
+            } else {
+                print("[ProviderSettings] WARNING: Keychain verify FAILED — apiKey(for: \(template.id)) returned nil")
+            }
+
             discoveryError = nil
         } catch {
+            print("[ProviderSettings] ERROR saving provider '\(template.name)': \(error)")
             discoveryError = "Failed to save provider: \(error.localizedDescription)"
         }
     }
