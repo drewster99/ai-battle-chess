@@ -341,29 +341,11 @@ final class GameEngine {
             isGameActive = false
             statusMessage = result.displayText
 
-            // Still animate the final move
             let distance = max(abs(annotatedMove.to.file - annotatedMove.from.file),
                              abs(annotatedMove.to.rank - annotatedMove.from.rank))
             let duration = max(Double(distance) / 5.0, 0.15)
-            withAnimation(.easeInOut(duration: duration)) {
-                animatingFileDelta = 0
-                animatingRankDelta = 0
-            }
             let moveID = annotatedMove.id
-            animationTask?.cancel()
-            animationTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(for: .seconds(duration + 0.05))
-                } catch is CancellationError {
-                    return
-                } catch {
-                    // Unexpected error — log and continue cleanup
-                }
-                guard let self else { return }
-                if self.animatingMove?.id == moveID {
-                    self.animatingMove = nil
-                }
-            }
+            startMoveAnimation(moveID: moveID, duration: duration)
 
             finalizeCurrentGame()
             return
@@ -371,31 +353,11 @@ final class GameEngine {
 
         statusMessage = "\(board.activeColor.displayName)'s turn"
 
-        // Animate the piece movement
         let distance = max(abs(annotatedMove.to.file - annotatedMove.from.file),
                          abs(annotatedMove.to.rank - annotatedMove.from.rank))
         let duration = max(Double(distance) / 5.0, 0.15)
-        withAnimation(.easeInOut(duration: duration)) {
-            animatingFileDelta = 0
-            animatingRankDelta = 0
-        }
-
-        // Clear animation flag after animation completes
         let moveID = annotatedMove.id
-        animationTask?.cancel()
-        animationTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .seconds(duration + 0.05))
-            } catch is CancellationError {
-                return
-            } catch {
-                // Unexpected error — log and continue cleanup
-            }
-            guard let self else { return }
-            if self.animatingMove?.id == moveID {
-                self.animatingMove = nil
-            }
-        }
+        startMoveAnimation(moveID: moveID, duration: duration)
 
         // Trigger AI if needed
         triggerAIMoveIfNeeded()
@@ -599,24 +561,31 @@ final class GameEngine {
 
         let distance = max(abs(move.to.file - move.from.file), abs(move.to.rank - move.from.rank))
         let duration = max(Double(distance) / 5.0, 0.15)
+        startMoveAnimation(moveID: move.id, duration: duration)
+    }
 
-        // Animate offset to zero (piece glides from source to destination)
-        withAnimation(.easeInOut(duration: duration)) {
-            animatingFileDelta = 0
-            animatingRankDelta = 0
-        }
-
-        let moveID = move.id
+    /// Defers the offset-to-zero animation to the next run loop tick so SwiftUI
+    /// renders the initial offset state first, then animates to zero.
+    private func startMoveAnimation(moveID: UUID, duration: Double) {
         animationTask?.cancel()
         animationTask = Task { [weak self] in
+            // Yield to allow SwiftUI to render the initial offset state
+            await Task.yield()
+            guard let self, !Task.isCancelled else { return }
+
+            withAnimation(.easeInOut(duration: duration)) {
+                self.animatingFileDelta = 0
+                self.animatingRankDelta = 0
+            }
+
             do {
                 try await Task.sleep(for: .seconds(duration + 0.05))
             } catch is CancellationError {
                 return
             } catch {
-                // Unexpected error — log and continue cleanup
+                // Unexpected error
             }
-            guard let self else { return }
+            guard !Task.isCancelled else { return }
             if self.animatingMove?.id == moveID {
                 self.animatingMove = nil
             }
