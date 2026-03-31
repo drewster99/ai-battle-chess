@@ -164,14 +164,14 @@ final class AIService {
         - **Draw:** Possible through stalemate, threefold repetition,
         insufficient material, or agreed upon by players.
 
-        ### PROMPT INPUT FORMAT
+        ## PROMPT INPUT FORMAT
         - You'll receive the current layout of the board in a labeled 8x8 grid
           - \(yourPieces)
           - \(theirPieces)
         - You'll receive a list of valid moves
           - Example: VALID MOVES: e2e3, e2e4
         
-        OUTPUT MOVE FORMAT — CRITICAL
+        ## OUTPUT MOVE FORMAT — CRITICAL
         Your output is processed by an automated chess system, so your output MUST
         EXACTLY match the REQUIRED format.
         
@@ -181,7 +181,7 @@ final class AIService {
         - Resigning: \(resignExample)
         - NEVER use algebraic notation (e.g. Nf6, Bxe5, O-O)
 
-        OUTPUT RESPONSE FORMAT
+        ## OUTPUT RESPONSE FORMAT
         \(outputResponseFormat)
         """
     }
@@ -286,6 +286,7 @@ final class AIService {
         var penalties: [AIPenalty] = []
         var retries = 0
         var lastActivityLog: AIActivityLog? = nil
+        var attempts: [AITurnAttempt] = []
 
         // Look up configuration details
         let config = llmKit.configurations.first(where: { $0.id == configurationID })
@@ -368,16 +369,19 @@ final class AIService {
                     throw AIError.httpError(statusCode: statusCode)
                 }
 
-                let moveText = try extractMoveText(from: data, providerType: preparedRequest.providerType)
+                let extracted = try extractMoveText(from: data, providerType: preparedRequest.providerType)
+                let moveText = extracted.move
+                let moveComment = extracted.comment
                 let tokenUsage = extractTokenUsage(from: data, providerType: preparedRequest.providerType)
                 let rawResponseText = String(data: data, encoding: .utf8) ?? "(binary data)"
 
-                print("[AIService] Response move text: \"\(moveText)\"")
+                print("[AIService] Response move: \"\(moveText)\" comment: \"\(moveComment ?? "(none)")\"")
 
                 // Check for resignation or draw claim before parsing as a move
-                if let specialResult = AIService.detectSpecialAction(moveText, color: color) {
+                if let specialResult = AIService.detectSpecialAction(rawResponseText, color: color) {
                     print("[AIService] SPECIAL ACTION detected: \(specialResult)")
                     print("[AIService] ====== END REQUEST ======")
+                    attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: true, errorMessage: nil))
                     let activityLog = AIActivityLog(
                         systemPrompt: systemMessage,
                         userPrompt: userMessage,
@@ -388,7 +392,8 @@ final class AIService {
                         modelName: config?.name ?? "Unknown",
                         providerName: provider?.name ?? "Unknown",
                         tokenUsage: tokenUsage,
-                        guidedGenerationResult: nil
+                        guidedGenerationResult: nil,
+                        attempts: attempts
                     )
                     switch specialResult {
                     case .resignation(let winner):
@@ -408,7 +413,8 @@ final class AIService {
                     modelName: config?.name ?? "Unknown",
                     providerName: provider?.name ?? "Unknown",
                     tokenUsage: tokenUsage,
-                    guidedGenerationResult: nil
+                    guidedGenerationResult: nil,
+                    attempts: attempts
                 )
 
                 // Parse the move
@@ -416,18 +422,12 @@ final class AIService {
                     let reason = "could not parse notation"
                     let correction = AIService.correctionPrompt(badMove: moveText, reason: reason, board: board)
                     print("[AIService] PARSE FAILURE: \"\(moveText)\" — sending correction")
-                    print("[AIService] Correction: \(correction)")
 
-                    // Append the failed exchange and correction to conversation
+                    attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: false, errorMessage: reason))
                     conversationMessages.append(ConversationMessage(role: .assistant, content: moveText))
                     conversationMessages.append(ConversationMessage(role: .user, content: correction))
 
-                    let penalty = AIPenalty(
-                        reason: "Could not parse: '\(moveText)' (attempt \(attempt + 1))",
-                        severity: .warning,
-                        timestamp: Date()
-                    )
-                    penalties.append(penalty)
+                    penalties.append(AIPenalty(reason: "Could not parse: '\(moveText)' (attempt \(attempt + 1))", severity: .warning, timestamp: Date()))
                     retries += 1
                     turnsSinceReset += 1
                     continue
@@ -443,17 +443,12 @@ final class AIService {
                     let reason = "not a legal move"
                     let correction = AIService.correctionPrompt(badMove: moveText, reason: reason, board: board)
                     print("[AIService] ILLEGAL MOVE: \"\(moveText)\" (\(parsed.from)->\(parsed.to)) — sending correction")
-                    print("[AIService] Correction: \(correction)")
 
+                    attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: false, errorMessage: reason))
                     conversationMessages.append(ConversationMessage(role: .assistant, content: moveText))
                     conversationMessages.append(ConversationMessage(role: .user, content: correction))
 
-                    let penalty = AIPenalty(
-                        reason: "Illegal: '\(moveText)' \(parsed.from)->\(parsed.to) (attempt \(attempt + 1))",
-                        severity: .minor,
-                        timestamp: Date()
-                    )
-                    penalties.append(penalty)
+                    penalties.append(AIPenalty(reason: "Illegal: '\(moveText)' \(parsed.from)->\(parsed.to) (attempt \(attempt + 1))", severity: .minor, timestamp: Date()))
                     retries += 1
                     turnsSinceReset += 1
                     continue
@@ -463,7 +458,10 @@ final class AIService {
                 let newBoard = board.applyingMove(legalMove)
                 let isCheck = MoveValidator.isKingInCheck(color: board.activeColor.opposite, on: newBoard)
                 let isCheckmate = isCheck && MoveValidator.isCheckmate(on: newBoard)
-                let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate)
+                let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate, comment: moveComment)
+
+                attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: true, errorMessage: nil))
+                lastActivityLog?.attempts = attempts
 
                 print("[AIService] SUCCESS: \(legalMove.from)\(legalMove.to) (check=\(isCheck), checkmate=\(isCheckmate))")
                 print("[AIService] Penalties: \(penalties.count), Retries: \(retries)")
@@ -555,7 +553,7 @@ final class AIService {
 
     // MARK: - Response Parsing
 
-    private func extractMoveText(from data: Data, providerType: ProviderType) throws -> String {
+    private func extractMoveText(from data: Data, providerType: ProviderType) throws -> (move: String, comment: String?) {
         let jsonObject: Any
         do {
             jsonObject = try JSONSerialization.jsonObject(with: data)
@@ -691,13 +689,30 @@ final class AIService {
         return nil
     }
 
-    /// Extracts a move from potentially noisy AI output.
-    private func cleanMoveText(_ text: String) -> String {
+    /// Extracts a move and optional comment from AI output.
+    /// Returns (cleanedMove, comment).
+    private func cleanMoveText(_ text: String) -> (move: String, comment: String?) {
         var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Strip comments: "e2e4 { capture knight }" → "e2e4"
-        if let braceRange = cleaned.range(of: "{") {
-            cleaned = String(cleaned[cleaned.startIndex..<braceRange.lowerBound])
+        // Extract comment: "e2e4 { capture knight }" → move="e2e4", comment="capture knight"
+        var comment: String? = nil
+        if let openBrace = cleaned.range(of: "{"),
+           let closeBrace = cleaned.range(of: "}") {
+            let commentContent = String(cleaned[openBrace.upperBound..<closeBrace.lowerBound])
+                .trimmingCharacters(in: .whitespaces)
+            if !commentContent.isEmpty {
+                comment = commentContent
+            }
+            cleaned = String(cleaned[cleaned.startIndex..<openBrace.lowerBound])
+                .trimmingCharacters(in: .whitespaces)
+        } else if let openBrace = cleaned.range(of: "{") {
+            // Unclosed brace — still extract
+            let commentContent = String(cleaned[openBrace.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !commentContent.isEmpty {
+                comment = commentContent
+            }
+            cleaned = String(cleaned[cleaned.startIndex..<openBrace.lowerBound])
                 .trimmingCharacters(in: .whitespaces)
         }
 
@@ -706,27 +721,28 @@ final class AIService {
 
         // If it's short and looks like a move, use it directly
         if cleaned.count <= 6 {
-            return cleaned
+            return (cleaned, comment)
         }
 
         // Try to find coordinate notation pattern
         let coordPattern = /[a-h][1-8][a-h][1-8][qrbn]?/
         if let match = cleaned.firstMatch(of: coordPattern) {
-            return String(match.output)
+            return (String(match.output), comment)
         }
 
         // Try to find SAN pattern (require word boundary to avoid matching substrings of longer text)
         let sanPattern = /\b[KQRBN][a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?\b/
         if let match = cleaned.firstMatch(of: sanPattern) {
-            return String(match.output)
+            return (String(match.output), comment)
         }
 
         // Castling
-        if cleaned.contains("O-O-O") || cleaned.contains("0-0-0") { return "O-O-O" }
-        if cleaned.contains("O-O") || cleaned.contains("0-0") { return "O-O" }
+        if cleaned.contains("O-O-O") || cleaned.contains("0-0-0") { return ("O-O-O", comment) }
+        if cleaned.contains("O-O") || cleaned.contains("0-0") { return ("O-O", comment) }
 
         // Return first line as fallback
-        return cleaned.components(separatedBy: .newlines).first ?? cleaned
+        let fallback = cleaned.components(separatedBy: .newlines).first ?? cleaned
+        return (fallback, comment)
     }
 }
 

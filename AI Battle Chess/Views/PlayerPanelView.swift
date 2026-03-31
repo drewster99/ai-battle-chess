@@ -273,7 +273,12 @@ struct PlayerPanelView: View {
                 tokenUsageView(tokens)
             }
 
-            // System Prompt
+            // Attempts for current turn
+            if let activity = engine.currentAIActivity[color] {
+                aiAttemptsView(activity.attempts)
+            }
+
+            // Disclosure groups for raw prompts/responses
             DisclosureGroup("System Prompt") {
                 ScrollView {
                     Text(AIService.systemPrompt(for: color, isAppleIntelligence: player.useAppleIntelligence))
@@ -285,7 +290,6 @@ struct PlayerPanelView: View {
             }
             .font(.caption)
 
-            // Last Prompt
             DisclosureGroup("Last Prompt") {
                 ScrollView {
                     Text(engine.currentAIActivity[color]?.userPrompt ?? "No prompt yet")
@@ -297,7 +301,6 @@ struct PlayerPanelView: View {
             }
             .font(.caption)
 
-            // Last Response
             DisclosureGroup("Last Response") {
                 ScrollView {
                     Text(engine.currentAIActivity[color]?.responseText ?? "No response yet")
@@ -308,11 +311,65 @@ struct PlayerPanelView: View {
                 .frame(maxHeight: 200)
             }
             .font(.caption)
+        }
+    }
 
-            // Guided Generation (Apple Intelligence)
-            if let activity = engine.currentAIActivity[color],
-               let guided = activity.guidedGenerationResult {
-                guidedGenerationView(guided)
+    // MARK: - AI Attempts View
+
+    private func aiAttemptsView(_ attempts: [AITurnAttempt]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            let invalidCount = attempts.filter { !$0.isValid }.count
+            if invalidCount > 0 {
+                Text("\(invalidCount) invalid response\(invalidCount == 1 ? "" : "s") this turn")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+
+            ForEach(attempts) { attempt in
+                VStack(alignment: .leading, spacing: 2) {
+                    // Thinking (blue)
+                    if let thinking = attempt.thinking, !thinking.isEmpty {
+                        Text(thinking)
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                            .lineLimit(3)
+                    }
+
+                    // Move with status indicator
+                    HStack(spacing: 4) {
+                        if attempt.isValid {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.caption2)
+                        } else {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundStyle(.red)
+                                .font(.caption2)
+                        }
+
+                        Text(attempt.moveText)
+                            .font(.caption2.monospaced().bold())
+
+                        if let comment = attempt.comment {
+                            Text("{ \(comment) }")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    // Error message
+                    if let error = attempt.errorMessage {
+                        Text(error)
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .padding(.vertical, 2)
+                .padding(.horizontal, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(attempt.isValid ? Color.green.opacity(0.05) : Color.red.opacity(0.05))
+                )
             }
         }
     }
@@ -385,32 +442,6 @@ struct PlayerPanelView: View {
         }
     }
 
-    // MARK: - Guided Generation
-
-    private func guidedGenerationView(_ result: AIGuidedGenerationResult) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Guided Generation")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            DisclosureGroup("Thinking") {
-                Text(result.thinkingLogic)
-                    .font(.caption2.monospaced())
-                    .textSelection(.enabled)
-            }
-            .font(.caption)
-
-            HStack(spacing: 12) {
-                Text("Move: \(result.move)")
-                    .font(.caption2.bold())
-                if let comment = result.comment {
-                    Text(comment)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
 
     // MARK: - Helpers
 

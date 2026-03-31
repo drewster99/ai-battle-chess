@@ -7,14 +7,11 @@ import FoundationModels
 @available(macOS 26.0, *)
 @Generable
 struct ChessMoveResponse {
-    @Guide(description: "Your step-by-step thinking and reasoning about the position and candidate moves")
+    @Guide(description: "Your step-by-step reasoning about the position and possible moves")
     var thinkingLogic: String
 
-    @Guide(description: "The chosen chess move in coordinate notation, e.g. e2e4, g1f3, e7e8q")
+    @Guide(description: "The chosen chess move in coordinate notation, e.g. e2e4, g1f3, e7e8q. Must match a move from the given list of valid moves")
     var move: String
-
-    @Guide(description: "Brief comment about the move, e.g. 'Developing the knight to control the center'")
-    var comment: String?
 }
 
 // MARK: - Apple Intelligence Service
@@ -45,6 +42,7 @@ final class AppleIntelligenceService {
         var penalties: [AIPenalty] = []
         var retries = 0
         var lastActivityLog: AIActivityLog? = nil
+        var attempts: [AITurnAttempt] = []
 
         let systemPrompt = AIService.systemPrompt(for: color, isAppleIntelligence: true, board: board)
         let userPrompt = AIService.boardStatePrompt(board: board)
@@ -94,12 +92,27 @@ final class AppleIntelligenceService {
                 )
 
                 let generated = response.content
-                let moveText = generated.move.trimmingCharacters(in: .whitespacesAndNewlines)
+                let rawMove = generated.move.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                print("[AppleIntelligence] Response — move: \"\(moveText)\" | thinking: \"\(generated.thinkingLogic)\" | comment: \"\(generated.comment ?? "(nil)")\"")
+                // Extract comment from move text (e.g. "e2e4 { developing }" → "e2e4", "developing")
+                let moveText: String
+                var moveComment: String? = nil
+                if let openBrace = rawMove.range(of: "{"),
+                   let closeBrace = rawMove.range(of: "}") {
+                    moveComment = String(rawMove[openBrace.upperBound..<closeBrace.lowerBound]).trimmingCharacters(in: .whitespaces)
+                    moveText = String(rawMove[rawMove.startIndex..<openBrace.lowerBound]).trimmingCharacters(in: .whitespaces)
+                } else {
+                    moveText = rawMove
+                }
+                // Normalize "e7e8=q" → "e7e8q"
+                let cleanedMoveText = moveText.replacingOccurrences(of: "=", with: "")
+
+                let thinking = generated.thinkingLogic
+
+                print("[AppleIntelligence] Response — move: \"\(cleanedMoveText)\" comment: \"\(moveComment ?? "(none)")\" | thinking: \"\(thinking)\"")
 
                 // Log the response to disk
-                let responseString = "Move: \(generated.move)\nThinking: \(generated.thinkingLogic)\nComment: \(generated.comment ?? "none")"
+                let responseString = "Move: \(generated.move)\nThinking: \(thinking)\n"
                 AILogger.logResponse(
                     gameID: gameID,
                     color: color,
@@ -111,9 +124,8 @@ final class AppleIntelligenceService {
 
                 // Build activity log
                 let guidedResult = AIGuidedGenerationResult(
-                    thinkingLogic: generated.thinkingLogic,
-                    move: generated.move,
-                    comment: generated.comment
+                    thinkingLogic: thinking,
+                    move: cleanedMoveText
                 )
                 lastActivityLog = AIActivityLog(
                     systemPrompt: systemPrompt,
@@ -125,13 +137,16 @@ final class AppleIntelligenceService {
                     modelName: "Apple Intelligence",
                     providerName: "Apple",
                     tokenUsage: nil,
-                    guidedGenerationResult: guidedResult
+                    guidedGenerationResult: guidedResult,
+                    attempts: attempts
                 )
 
                 // Check for resignation or draw claim
-                if let specialResult = AIService.detectSpecialAction(moveText, color: color) {
+                if let specialResult = AIService.detectSpecialAction(cleanedMoveText, color: color) {
                     print("[AppleIntelligence] SPECIAL ACTION detected: \(specialResult)")
                     print("[AppleIntelligence] ====== END REQUEST ======")
+                    attempts.append(AITurnAttempt(thinking: thinking, moveText: cleanedMoveText, comment: moveComment, isValid: true, errorMessage: nil))
+                    lastActivityLog?.attempts = attempts
                     switch specialResult {
                     case .resignation(let winner):
                         return (.resignation(winner: winner), penalties, retries, lastActivityLog)
@@ -141,16 +156,14 @@ final class AppleIntelligenceService {
                 }
 
                 // Parse the move
-                guard let parsed = PGNFormatter.parseAIMoveNotation(moveText, on: board) else {
-                    let correction = AIService.correctionPrompt(badMove: moveText, reason: "could not parse notation", board: board)
-                    print("[AppleIntelligence] PARSE FAILURE: \"\(moveText)\" — sending correction")
+                guard let parsed = PGNFormatter.parseAIMoveNotation(cleanedMoveText, on: board) else {
+                    let reason = "could not parse notation"
+                    let correction = AIService.correctionPrompt(badMove: cleanedMoveText, reason: reason, board: board)
+                    print("[AppleIntelligence] PARSE FAILURE: \"\(cleanedMoveText)\" — sending correction")
 
+                    attempts.append(AITurnAttempt(thinking: thinking, moveText: cleanedMoveText, comment: moveComment, isValid: false, errorMessage: reason))
                     currentPrompt = correction
-                    penalties.append(AIPenalty(
-                        reason: "Could not parse: '\(moveText)' (attempt \(attempt + 1))",
-                        severity: .warning,
-                        timestamp: Date()
-                    ))
+                    penalties.append(AIPenalty(reason: "Could not parse: '\(cleanedMoveText)' (attempt \(attempt + 1))", severity: .warning, timestamp: Date()))
                     retries += 1
                     turnsSinceReset += 1
                     continue
@@ -165,15 +178,13 @@ final class AppleIntelligenceService {
                     promotion: parsed.promotion,
                     on: board
                 ) else {
-                    let correction = AIService.correctionPrompt(badMove: moveText, reason: "not a legal move", board: board)
-                    print("[AppleIntelligence] ILLEGAL MOVE: \"\(moveText)\" — sending correction")
+                    let reason = "not a legal move"
+                    let correction = AIService.correctionPrompt(badMove: cleanedMoveText, reason: reason, board: board)
+                    print("[AppleIntelligence] ILLEGAL MOVE: \"\(cleanedMoveText)\" — sending correction")
 
+                    attempts.append(AITurnAttempt(thinking: thinking, moveText: cleanedMoveText, comment: moveComment, isValid: false, errorMessage: reason))
                     currentPrompt = correction
-                    penalties.append(AIPenalty(
-                        reason: "Illegal: '\(moveText)' \(parsed.from)->\(parsed.to) (attempt \(attempt + 1))",
-                        severity: .minor,
-                        timestamp: Date()
-                    ))
+                    penalties.append(AIPenalty(reason: "Illegal: '\(cleanedMoveText)' \(parsed.from)->\(parsed.to) (attempt \(attempt + 1))", severity: .minor, timestamp: Date()))
                     retries += 1
                     turnsSinceReset += 1
                     continue
@@ -183,7 +194,10 @@ final class AppleIntelligenceService {
                 let newBoard = board.applyingMove(legalMove)
                 let isCheck = MoveValidator.isKingInCheck(color: board.activeColor.opposite, on: newBoard)
                 let isCheckmate = isCheck && MoveValidator.isCheckmate(on: newBoard)
-                let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate)
+                let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate, comment: moveComment)
+
+                attempts.append(AITurnAttempt(thinking: thinking, moveText: cleanedMoveText, comment: moveComment, isValid: true, errorMessage: nil))
+                lastActivityLog?.attempts = attempts
 
                 print("[AppleIntelligence] SUCCESS: \(legalMove.from)\(legalMove.to) (check=\(isCheck), checkmate=\(isCheckmate), retries=\(retries))")
                 print("[AppleIntelligence] ====== END REQUEST ======")

@@ -137,6 +137,7 @@ struct ChessMove: Equatable, Sendable, Codable, Identifiable {
     let promotionType: PieceType?
     let isCheck: Bool
     let isCheckmate: Bool
+    let comment: String?
 
     init(
         piece: ChessPiece,
@@ -149,6 +150,7 @@ struct ChessMove: Equatable, Sendable, Codable, Identifiable {
         promotionType: PieceType? = nil,
         isCheck: Bool = false,
         isCheckmate: Bool = false,
+        comment: String? = nil,
         id: UUID = UUID()
     ) {
         self.id = id
@@ -162,10 +164,11 @@ struct ChessMove: Equatable, Sendable, Codable, Identifiable {
         self.promotionType = promotionType
         self.isCheck = isCheck
         self.isCheckmate = isCheckmate
+        self.comment = comment
     }
 
-    /// Returns a copy with check/checkmate flags updated
-    func withCheckStatus(isCheck: Bool, isCheckmate: Bool) -> ChessMove {
+    /// Returns a copy with check/checkmate flags and optional comment updated.
+    func withCheckStatus(isCheck: Bool, isCheckmate: Bool, comment: String? = nil) -> ChessMove {
         ChessMove(
             piece: piece,
             from: from,
@@ -177,6 +180,7 @@ struct ChessMove: Equatable, Sendable, Codable, Identifiable {
             promotionType: promotionType,
             isCheck: isCheck,
             isCheckmate: isCheckmate,
+            comment: comment ?? self.comment,
             id: id
         )
     }
@@ -308,6 +312,16 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
 
 // MARK: - AI Activity Log
 
+/// A single attempt by the AI to produce a move.
+struct AITurnAttempt: Sendable, Equatable, Identifiable {
+    let id = UUID()
+    let thinking: String?
+    let moveText: String
+    let comment: String?
+    let isValid: Bool
+    let errorMessage: String?
+}
+
 /// Captures the details of a single AI interaction for display and debugging.
 struct AIActivityLog: Sendable, Equatable {
     let systemPrompt: String
@@ -320,6 +334,7 @@ struct AIActivityLog: Sendable, Equatable {
     let providerName: String
     let tokenUsage: TokenUsage?
     let guidedGenerationResult: AIGuidedGenerationResult?
+    var attempts: [AITurnAttempt]
 }
 
 // MARK: - Token Usage
@@ -340,7 +355,6 @@ struct TokenUsage: Codable, Sendable, Equatable {
 struct AIGuidedGenerationResult: Sendable, Equatable {
     let thinkingLogic: String
     let move: String
-    let comment: String?
 }
 
 // MARK: - AI Selection
