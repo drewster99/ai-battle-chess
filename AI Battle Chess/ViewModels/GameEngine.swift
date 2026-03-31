@@ -430,7 +430,9 @@ final class GameEngine {
                         board: boardSnapshot,
                         moveHistory: historySnapshot,
                         boardStates: statesSnapshot,
-                        color: color
+                        color: color,
+                        gameID: gameID,
+                        gameTurnIndex: gameTurnIndex
                     )
                     result = (appleResult.move, appleResult.penalties, appleResult.retries, appleResult.activityLog)
                 } else if let configID = player.aiConfigurationID {
@@ -471,8 +473,22 @@ final class GameEngine {
                 isAIThinking = false
                 currentAIColor = nil
 
-                if let aiError = error as? AIError, case .tooManyRetries = aiError {
-                    // AI forfeits
+                // Extract accumulated retry state from the service failure
+                let failure = error as? AIServiceFailure
+                let actualError = failure?.underlyingError ?? error
+
+                if let failure {
+                    for penalty in failure.penalties {
+                        statistics.aiPenalties[color, default: []].append(penalty)
+                    }
+                    statistics.aiRetryCount[color, default: 0] += failure.retries
+                    if let log = failure.lastActivityLog {
+                        currentAIActivity[color] = log
+                    }
+                }
+
+                if let aiError = actualError as? AIError, case .tooManyRetries = aiError {
+                    // AI forfeits — all retry details are already recorded above
                     let penalty = AIPenalty(
                         reason: "AI forfeited after \(AIService.maxRetries) failed attempts",
                         severity: .critical,
@@ -485,7 +501,7 @@ final class GameEngine {
                     statusMessage = result.displayText
                     finalizeCurrentGame()
                 } else {
-                    errorMessage = "AI Error: \(error.localizedDescription)"
+                    errorMessage = "AI Error: \(actualError.localizedDescription)"
                     statusMessage = "AI error - \(color.displayName) turn"
                 }
             }

@@ -256,12 +256,22 @@ final class AIService {
                 penalties.append(penalty)
                 retries += 1
                 if attempt >= AIService.maxRetries - 1 {
-                    throw error
+                    throw AIServiceFailure(
+                        underlyingError: error,
+                        penalties: penalties,
+                        retries: retries,
+                        lastActivityLog: lastActivityLog
+                    )
                 }
             }
         }
 
-        throw AIError.tooManyRetries
+        throw AIServiceFailure(
+            underlyingError: AIError.tooManyRetries,
+            penalties: penalties,
+            retries: retries,
+            lastActivityLog: lastActivityLog
+        )
     }
 
     // MARK: - Request Building
@@ -446,6 +456,21 @@ final class AIService {
 /// Nonisolated constants for AI configuration.
 enum AIConstants {
     static let maxRetries = 3
+}
+
+// MARK: - AI Service Failure
+
+/// Wraps the underlying error along with all accumulated retry state so the caller
+/// can display penalties, retry counts, and the last activity log even when the service fails.
+struct AIServiceFailure: Error, LocalizedError {
+    let underlyingError: Error
+    let penalties: [AIPenalty]
+    let retries: Int
+    let lastActivityLog: AIActivityLog?
+
+    var errorDescription: String? {
+        underlyingError.localizedDescription
+    }
 }
 
 // MARK: - AI Errors

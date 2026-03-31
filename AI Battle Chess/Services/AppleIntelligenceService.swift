@@ -34,7 +34,9 @@ final class AppleIntelligenceService {
         board: ChessBoard,
         moveHistory: [ChessMove],
         boardStates: [ChessBoard],
-        color: PieceColor
+        color: PieceColor,
+        gameID: UUID,
+        gameTurnIndex: Int
     ) async throws -> (move: ChessMove, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
         guard AppleIntelligenceService.isAvailable else {
             throw AIError.appleIntelligenceUnavailable
@@ -57,6 +59,17 @@ final class AppleIntelligenceService {
                     boardStates: boardStates
                 )
 
+                // Log the request prompt to disk
+                let promptData = Data(userPrompt.utf8)
+                AILogger.logRequest(
+                    gameID: gameID,
+                    color: color,
+                    gameTurnIndex: gameTurnIndex,
+                    providerModel: "apple_intelligence",
+                    attemptIndex: attempt,
+                    requestBody: promptData
+                )
+
                 let response = try await session.respond(
                     to: userPrompt,
                     generating: ChessMoveResponse.self
@@ -64,6 +77,18 @@ final class AppleIntelligenceService {
 
                 let generated = response.content
                 let moveText = generated.move.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                // Log the response to disk
+                let responseString = "Move: \(generated.move)\nThinking: \(generated.thinkingLogic)\nComment: \(generated.comment ?? "none")"
+                let responseData = Data(responseString.utf8)
+                AILogger.logResponse(
+                    gameID: gameID,
+                    color: color,
+                    gameTurnIndex: gameTurnIndex,
+                    providerModel: "apple_intelligence",
+                    attemptIndex: attempt,
+                    responseBody: responseData
+                )
 
                 // Build guided generation result
                 let guidedResult = AIGuidedGenerationResult(
@@ -131,11 +156,21 @@ final class AppleIntelligenceService {
                 penalties.append(penalty)
                 retries += 1
                 if attempt >= AIService.maxRetries - 1 {
-                    throw error
+                    throw AIServiceFailure(
+                        underlyingError: error,
+                        penalties: penalties,
+                        retries: retries,
+                        lastActivityLog: lastActivityLog
+                    )
                 }
             }
         }
 
-        throw AIError.tooManyRetries
+        throw AIServiceFailure(
+            underlyingError: AIError.tooManyRetries,
+            penalties: penalties,
+            retries: retries,
+            lastActivityLog: lastActivityLog
+        )
     }
 }
