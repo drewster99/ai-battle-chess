@@ -20,43 +20,64 @@ final class AIService {
     // MARK: - System Prompt
 
     static func systemPrompt(for color: PieceColor) -> String {
-        let pieceCase = color == .white
-            ? "UPPERCASE letters (K, Q, R, B, N, P)"
-            : "lowercase letters (k, q, r, b, n, p)"
+        let yourPieces: String
+        let theirPieces: String
+        if color == .white {
+            yourPieces = "Your pieces (White) are uppercase: K Q R B N P"
+            theirPieces = "Black's pieces are lowercase: k q r b n p"
+        } else {
+            yourPieces = "Your pieces (Black) are lowercase: k q r b n p"
+            theirPieces = "White's pieces are uppercase: K Q R B N P"
+        }
+
+        let castlingExample = color == .white
+            ? "e1g1 (kingside) or e1c1 (queenside)"
+            : "e8g8 (kingside) or e8c8 (queenside)"
 
         return """
-        You are a chess engine playing as \(color.displayName). You are an expert chess player.
+        You are a chess engine playing as \(color.displayName). Play strong chess.
 
-        RULES:
-        - You will receive the current board state and move history.
-        - On the board diagram, \(color.displayName)'s pieces are shown as \(pieceCase).
-        - You will also receive a list of your legal moves. You MUST pick one of them.
-        - Use coordinate notation: [source square][destination square][optional promotion piece]
-        - Coordinate notation always uses LOWERCASE file letters (a-h) and digits (1-8).
-        - Examples: e2e4, g1f3, e7e8q (pawn promotion to queen)
-        - For castling: e1g1 (kingside) or e1c1 (queenside) for white; e8g8 or e8c8 for black.
-        - Do NOT use algebraic notation like Nf3, Bxe5, or O-O. Use coordinate notation ONLY.
-        - Do NOT include move numbers, check symbols (+/#), or any other text.
-        - Respond with ONLY the move, nothing else. No explanation, no commentary.
+        YOUR MOVE FORMAT — CRITICAL
+        Respond with exactly one move and nothing else. No explanation, no words, no punctuation.
+        Use coordinate notation only: source square + destination square (+ promotion piece if needed).
+        All letters must be lowercase. Examples: e7e5, g8f6, e2e1q
+        Castling: \(castlingExample)
+        NEVER use algebraic notation (e.g. Nf6, Bxe5, O-O). Coordinate notation ONLY.
 
-        STRATEGY:
-        - Play strong, principled chess.
-        - Control the center, develop pieces, ensure king safety.
-        - Look for tactical opportunities (forks, pins, skewers).
-        - In the endgame, activate your king and push passed pawns.
+        BOARD REFERENCE
+        \(yourPieces)
+        \(theirPieces)
 
-        Your response must be exactly one move in coordinate notation, chosen from the legal moves list. Nothing else.
+        HOW TO RESPOND
+        You will receive the board state, move history, and a list of your legal moves.
+        You must pick a move from the legal moves list. Do not invent moves.
+        Output that move and nothing else.
+
+        STRATEGY
+        Control the center. Develop pieces early. Keep your king safe. Look for tactics (forks, pins, skewers). In endgames, activate your king and advance passed pawns.
         """
     }
 
     static func boardStatePrompt(board: ChessBoard, moveHistory: [ChessMove], boardStates: [ChessBoard]) -> String {
         var prompt = ""
 
-        // Current PGN
+        // Move history — just the move text, no PGN headers
         if !moveHistory.isEmpty {
-            prompt += "Game so far (PGN):\n"
-            prompt += PGNFormatter.generatePGN(moves: moveHistory, boardStates: boardStates, result: nil)
-            prompt += "\n\n"
+            prompt += "Move history: "
+            var moveText = ""
+            for (index, move) in moveHistory.enumerated() {
+                guard index < boardStates.count else { break }
+                let san = PGNFormatter.moveToSAN(move, on: boardStates[index])
+                if index % 2 == 0 {
+                    let moveNum = (index / 2) + 1
+                    moveText += "\(moveNum). "
+                }
+                moveText += san
+                if index < moveHistory.count - 1 {
+                    moveText += " "
+                }
+            }
+            prompt += moveText + "\n\n"
         }
 
         // ASCII board
@@ -64,18 +85,9 @@ final class AIService {
         prompt += asciiBoard(board)
         prompt += "\n"
 
-        // Active color
-        prompt += "It is \(board.activeColor.displayName)'s turn to move.\n"
-
-        // Castling rights
-        var castlingInfo: [String] = []
-        if board.whiteCanCastleKingside { castlingInfo.append("White O-O") }
-        if board.whiteCanCastleQueenside { castlingInfo.append("White O-O-O") }
-        if board.blackCanCastleKingside { castlingInfo.append("Black O-O") }
-        if board.blackCanCastleQueenside { castlingInfo.append("Black O-O-O") }
-        if !castlingInfo.isEmpty {
-            prompt += "Castling available: \(castlingInfo.joined(separator: ", "))\n"
-        }
+        // Active color with piece case reminder
+        let pieceCase = board.activeColor == .white ? "uppercase (K Q R B N P)" : "lowercase (k q r b n p)"
+        prompt += "\(board.activeColor.displayName) to move. Your pieces are \(pieceCase).\n"
 
         // En passant
         if let ep = board.enPassantTarget {
@@ -96,8 +108,8 @@ final class AIService {
             }
             return s
         }
-        prompt += "\nYour legal moves are: \(moveStrings.joined(separator: ", "))\n"
-        prompt += "You MUST respond with EXACTLY ONE of the moves listed above. No other move will be accepted.\n"
+        prompt += "\nYour legal moves: \(moveStrings.joined(separator: ", "))\n"
+        prompt += "Reply with exactly one move from this list.\n"
 
         return prompt
     }
