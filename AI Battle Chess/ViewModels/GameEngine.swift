@@ -343,7 +343,7 @@ final class GameEngine {
 
             let distance = max(abs(annotatedMove.to.file - annotatedMove.from.file),
                              abs(annotatedMove.to.rank - annotatedMove.from.rank))
-            let duration = max(Double(distance) / 5.0, 0.15)
+            let duration = max(Double(distance) / 2.5, 0.30)
             let moveID = annotatedMove.id
             startMoveAnimation(moveID: moveID, duration: duration)
 
@@ -355,7 +355,7 @@ final class GameEngine {
 
         let distance = max(abs(annotatedMove.to.file - annotatedMove.from.file),
                          abs(annotatedMove.to.rank - annotatedMove.from.rank))
-        let duration = max(Double(distance) / 5.0, 0.15)
+        let duration = max(Double(distance) / 2.5, 0.30)
         let moveID = annotatedMove.id
         startMoveAnimation(moveID: moveID, duration: duration)
 
@@ -554,7 +554,7 @@ final class GameEngine {
         viewingMoveIndex = nextIndex
 
         let distance = max(abs(move.to.file - move.from.file), abs(move.to.rank - move.from.rank))
-        let duration = max(Double(distance) / 5.0, 0.15)
+        let duration = max(Double(distance) / 2.5, 0.30)
         startMoveAnimation(moveID: move.id, duration: duration)
     }
 
