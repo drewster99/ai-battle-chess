@@ -30,6 +30,7 @@ final class AppleIntelligenceService {
     }
 
     /// Requests a chess move using Apple Intelligence on-device model with guided generation.
+    /// Uses a single session so correction messages are part of the conversation history.
     func requestMove(
         board: ChessBoard,
         moveHistory: [ChessMove],
@@ -48,76 +49,67 @@ final class AppleIntelligenceService {
         var lastActivityLog: AIActivityLog? = nil
 
         let systemPrompt = AIService.systemPrompt(for: color)
+        let userPrompt = AIService.boardStatePrompt(board: board)
 
         print("[AppleIntelligence] ====== REQUEST ======")
         print("[AppleIntelligence] Color: \(color.displayName) | Turn: \(gameTurnIndex) | Game: \(gameID.uuidString.prefix(8))")
         print("[AppleIntelligence] --- SYSTEM PROMPT ---")
         print(systemPrompt)
-        print("[AppleIntelligence] --- END SYSTEM PROMPT ---")
+        print("[AppleIntelligence] --- USER PROMPT ---")
+        print(userPrompt)
+        print("[AppleIntelligence] --- END PROMPTS ---")
+
+        // Single session — corrections accumulate in conversation history
+        let session = LanguageModelSession(instructions: systemPrompt)
+
+        // The prompt for the current attempt: first time it's the board state,
+        // subsequent times it's a correction message
+        var currentPrompt = userPrompt
 
         for attempt in 0..<AIService.maxRetries {
-            // Create a fresh session per attempt to avoid accumulating failed turns in context
-            let session = LanguageModelSession(instructions: systemPrompt)
-
             do {
-                let userPrompt = AIService.boardStatePrompt(
-                    board: board,
-                    moveHistory: moveHistory,
-                    boardStates: boardStates
-                )
-
                 print("[AppleIntelligence] --- ATTEMPT \(attempt + 1)/\(AIService.maxRetries) ---")
-                print("[AppleIntelligence] --- USER PROMPT ---")
-                print(userPrompt)
-                print("[AppleIntelligence] --- END USER PROMPT ---")
-                print("[AppleIntelligence] Calling session.respond(generating: ChessMoveResponse.self)...")
+                if attempt > 0 {
+                    print("[AppleIntelligence] Correction prompt: \(currentPrompt)")
+                }
 
                 // Log the request prompt to disk
-                let promptData = Data(userPrompt.utf8)
                 AILogger.logRequest(
                     gameID: gameID,
                     color: color,
                     gameTurnIndex: gameTurnIndex,
                     providerModel: "apple_intelligence",
                     attemptIndex: attempt,
-                    requestBody: promptData
+                    requestBody: Data(currentPrompt.utf8)
                 )
 
                 let response = try await session.respond(
-                    to: userPrompt,
+                    to: currentPrompt,
                     generating: ChessMoveResponse.self
                 )
 
                 let generated = response.content
                 let moveText = generated.move.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                print("[AppleIntelligence] --- RESPONSE ---")
-                print("[AppleIntelligence] Raw move field: \"\(generated.move)\"")
-                print("[AppleIntelligence] Trimmed move:   \"\(moveText)\"")
-                print("[AppleIntelligence] Thinking:       \"\(generated.thinkingLogic)\"")
-                print("[AppleIntelligence] Comment:        \"\(generated.comment ?? "(nil)")\"")
-                print("[AppleIntelligence] --- END RESPONSE ---")
+                print("[AppleIntelligence] Response — move: \"\(moveText)\" | thinking: \"\(generated.thinkingLogic)\" | comment: \"\(generated.comment ?? "(nil)")\"")
 
                 // Log the response to disk
                 let responseString = "Move: \(generated.move)\nThinking: \(generated.thinkingLogic)\nComment: \(generated.comment ?? "none")"
-                let responseData = Data(responseString.utf8)
                 AILogger.logResponse(
                     gameID: gameID,
                     color: color,
                     gameTurnIndex: gameTurnIndex,
                     providerModel: "apple_intelligence",
                     attemptIndex: attempt,
-                    responseBody: responseData
+                    responseBody: Data(responseString.utf8)
                 )
 
-                // Build guided generation result
+                // Build activity log
                 let guidedResult = AIGuidedGenerationResult(
                     thinkingLogic: generated.thinkingLogic,
                     move: generated.move,
                     comment: generated.comment
                 )
-
-                // Build activity log
                 lastActivityLog = AIActivityLog(
                     systemPrompt: systemPrompt,
                     userPrompt: userPrompt,
@@ -133,25 +125,20 @@ final class AppleIntelligenceService {
 
                 // Parse the move
                 guard let parsed = PGNFormatter.parseAIMoveNotation(moveText, on: board) else {
-                    let reason = "Apple Intelligence: could not parse '\(moveText)' (attempt \(attempt + 1))"
-                    print("[AppleIntelligence] PARSE FAILURE: \(reason)")
+                    let correction = AIService.correctionPrompt(badMove: moveText, reason: "could not parse notation", board: board)
+                    print("[AppleIntelligence] PARSE FAILURE: \"\(moveText)\" — sending correction")
 
-                    // Also dump legal moves for debugging
-                    let legalMoves = MoveValidator.allLegalMoves(for: board)
-                    let legalDescriptions = legalMoves.map { "\($0.from)\($0.to)" }
-                    print("[AppleIntelligence] Legal moves for \(color.displayName): \(legalDescriptions.joined(separator: ", "))")
-
-                    let penalty = AIPenalty(
-                        reason: reason,
+                    currentPrompt = correction
+                    penalties.append(AIPenalty(
+                        reason: "Could not parse: '\(moveText)' (attempt \(attempt + 1))",
                         severity: .warning,
                         timestamp: Date()
-                    )
-                    penalties.append(penalty)
+                    ))
                     retries += 1
                     continue
                 }
 
-                print("[AppleIntelligence] Parsed: from=\(parsed.from) to=\(parsed.to) promotion=\(parsed.promotion?.notation ?? "none")")
+                print("[AppleIntelligence] Parsed: \(parsed.from)->\(parsed.to) promotion=\(parsed.promotion?.notation ?? "none")")
 
                 // Validate legality
                 guard let legalMove = MoveValidator.findLegalMove(
@@ -160,50 +147,40 @@ final class AppleIntelligenceService {
                     promotion: parsed.promotion,
                     on: board
                 ) else {
-                    let reason = "Apple Intelligence: illegal move '\(moveText)' from \(parsed.from) to \(parsed.to) (attempt \(attempt + 1))"
-                    print("[AppleIntelligence] ILLEGAL MOVE: \(reason)")
+                    let correction = AIService.correctionPrompt(badMove: moveText, reason: "not a legal move", board: board)
+                    print("[AppleIntelligence] ILLEGAL MOVE: \"\(moveText)\" — sending correction")
 
-                    let legalMoves = MoveValidator.allLegalMoves(for: board)
-                    let legalDescriptions = legalMoves.map { "\($0.from)\($0.to)" }
-                    print("[AppleIntelligence] Legal moves for \(color.displayName): \(legalDescriptions.joined(separator: ", "))")
-
-                    let penalty = AIPenalty(
-                        reason: reason,
+                    currentPrompt = correction
+                    penalties.append(AIPenalty(
+                        reason: "Illegal: '\(moveText)' \(parsed.from)->\(parsed.to) (attempt \(attempt + 1))",
                         severity: .minor,
                         timestamp: Date()
-                    )
-                    penalties.append(penalty)
+                    ))
                     retries += 1
                     continue
                 }
 
-                // Check/checkmate annotation
+                // Success
                 let newBoard = board.applyingMove(legalMove)
                 let isCheck = MoveValidator.isKingInCheck(color: board.activeColor.opposite, on: newBoard)
                 let isCheckmate = isCheck && MoveValidator.isCheckmate(on: newBoard)
                 let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate)
 
-                print("[AppleIntelligence] SUCCESS: \(legalMove.from)\(legalMove.to) (check=\(isCheck), checkmate=\(isCheckmate))")
-                print("[AppleIntelligence] Penalties this turn: \(penalties.count), Retries: \(retries)")
+                print("[AppleIntelligence] SUCCESS: \(legalMove.from)\(legalMove.to) (check=\(isCheck), checkmate=\(isCheckmate), retries=\(retries))")
                 print("[AppleIntelligence] ====== END REQUEST ======")
 
                 return (annotatedMove, penalties, retries, lastActivityLog)
             } catch {
-                let reason = "Apple Intelligence error: \(error.localizedDescription) (attempt \(attempt + 1))"
-                print("[AppleIntelligence] ERROR on attempt \(attempt + 1): \(error)")
-                print("[AppleIntelligence] Error type: \(type(of: error))")
-                print("[AppleIntelligence] Error description: \(error.localizedDescription)")
+                print("[AppleIntelligence] ERROR attempt \(attempt + 1): \(type(of: error)) — \(error.localizedDescription)")
 
-                let penalty = AIPenalty(
-                    reason: reason,
+                penalties.append(AIPenalty(
+                    reason: "Error: \(error.localizedDescription) (attempt \(attempt + 1))",
                     severity: attempt >= AIService.maxRetries - 1 ? .critical : .major,
                     timestamp: Date()
-                )
-                penalties.append(penalty)
+                ))
                 retries += 1
                 if attempt >= AIService.maxRetries - 1 {
-                    print("[AppleIntelligence] FATAL: All \(AIService.maxRetries) attempts failed with errors")
-                    print("[AppleIntelligence] All penalties: \(penalties.map(\.reason).joined(separator: "; "))")
+                    print("[AppleIntelligence] FATAL: All \(AIService.maxRetries) attempts failed")
                     print("[AppleIntelligence] ====== END REQUEST (FAILURE) ======")
                     throw AIServiceFailure(
                         underlyingError: error,
@@ -212,11 +189,13 @@ final class AppleIntelligenceService {
                         lastActivityLog: lastActivityLog
                     )
                 }
+                // On error, reset to a fresh session for next attempt
+                currentPrompt = userPrompt
             }
         }
 
-        print("[AppleIntelligence] FATAL: Exhausted all \(AIService.maxRetries) attempts (parse/illegal failures)")
-        print("[AppleIntelligence] All penalties: \(penalties.map(\.reason).joined(separator: "; "))")
+        print("[AppleIntelligence] FATAL: Exhausted \(AIService.maxRetries) attempts")
+        print("[AppleIntelligence] Penalties: \(penalties.map(\.reason).joined(separator: "; "))")
         print("[AppleIntelligence] ====== END REQUEST (TOO MANY RETRIES) ======")
 
         throw AIServiceFailure(

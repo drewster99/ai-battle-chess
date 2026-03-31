@@ -58,27 +58,8 @@ final class AIService {
         """
     }
 
-    static func boardStatePrompt(board: ChessBoard, moveHistory: [ChessMove], boardStates: [ChessBoard]) -> String {
+    static func boardStatePrompt(board: ChessBoard) -> String {
         var prompt = ""
-
-        // Move history — just the move text, no PGN headers
-        if !moveHistory.isEmpty {
-            prompt += "Move history: "
-            var moveText = ""
-            for (index, move) in moveHistory.enumerated() {
-                guard index < boardStates.count else { break }
-                let san = PGNFormatter.moveToSAN(move, on: boardStates[index])
-                if index % 2 == 0 {
-                    let moveNum = (index / 2) + 1
-                    moveText += "\(moveNum). "
-                }
-                moveText += san
-                if index < moveHistory.count - 1 {
-                    moveText += " "
-                }
-            }
-            prompt += moveText + "\n\n"
-        }
 
         // ASCII board
         prompt += "Current board position:\n"
@@ -100,18 +81,28 @@ final class AIService {
         }
 
         // Legal moves list — the AI MUST pick one of these
-        let legalMoves = MoveValidator.allLegalMoves(for: board)
-        let moveStrings = legalMoves.map { move -> String in
+        let moveStrings = legalMovesStringList(for: board)
+        prompt += "\nYour legal moves: \(moveStrings.joined(separator: ", "))\n"
+        prompt += "Reply with exactly one move from this list.\n"
+
+        return prompt
+    }
+
+    /// Returns legal moves as coordinate notation strings for the active color.
+    static func legalMovesStringList(for board: ChessBoard) -> [String] {
+        MoveValidator.allLegalMoves(for: board).map { move -> String in
             var s = "\(move.from)\(move.to)"
             if let promo = move.promotionType {
                 s += promo.notation.lowercased()
             }
             return s
         }
-        prompt += "\nYour legal moves: \(moveStrings.joined(separator: ", "))\n"
-        prompt += "Reply with exactly one move from this list.\n"
+    }
 
-        return prompt
+    /// Builds a correction message to send back when the AI picks an illegal/unparseable move.
+    static func correctionPrompt(badMove: String, reason: String, board: ChessBoard) -> String {
+        let legalMoves = legalMovesStringList(for: board)
+        return "Illegal move: \"\(badMove)\" — \(reason). Choose one of: \(legalMoves.joined(separator: ", "))"
     }
 
     private static func asciiBoard(_ board: ChessBoard) -> String {
@@ -148,7 +139,9 @@ final class AIService {
 
     // MARK: - Request AI Move
 
-    /// Requests a move from the AI, handling retries and error penalties.
+    /// Requests a move from the AI using a multi-turn conversation.
+    /// When the AI returns an illegal or unparseable move, a correction message is appended
+    /// to the conversation so the AI can see its mistake and try again.
     func requestMove(
         configurationID: UUID,
         board: ChessBoard,
@@ -162,27 +155,36 @@ final class AIService {
         var retries = 0
         var lastActivityLog: AIActivityLog? = nil
 
-        // Look up configuration details for the activity log
+        // Look up configuration details
         let config = llmKit.configurations.first(where: { $0.id == configurationID })
         let provider = config.flatMap { c in llmKit.providers.first(where: { $0.id == c.providerID }) }
         let providerModel = "\(provider?.name ?? "unknown")_\(config?.modelID ?? "unknown")"
+        let modelLabel = config?.name ?? providerModel
+
+        let systemMessage = AIService.systemPrompt(for: color)
+        let userMessage = AIService.boardStatePrompt(board: board)
+
+        print("[AIService] ====== REQUEST ======")
+        print("[AIService] \(modelLabel) | \(color.displayName) | Turn \(gameTurnIndex) | Game \(gameID.uuidString.prefix(8))")
+        print("[AIService] --- SYSTEM PROMPT ---")
+        print(systemMessage)
+        print("[AIService] --- USER PROMPT ---")
+        print(userMessage)
+        print("[AIService] --- END PROMPTS ---")
+
+        // Build conversation history — corrections append as assistant + user turns
+        var conversationMessages: [ConversationMessage] = [
+            ConversationMessage(role: .user, content: userMessage)
+        ]
 
         for attempt in 0..<AIService.maxRetries {
             do {
                 let preparedRequest = try llmKit.prepareRequest(for: configurationID)
 
-                // Build messages
-                let systemMessage = AIService.systemPrompt(for: color)
-                let userMessage = AIService.boardStatePrompt(
-                    board: board,
-                    moveHistory: moveHistory,
-                    boardStates: boardStates
-                )
-
-                let body = buildRequestBody(
+                let body = buildConversationBody(
                     prepared: preparedRequest,
                     systemMessage: systemMessage,
-                    userMessage: userMessage
+                    messages: conversationMessages
                 )
 
                 var request = preparedRequest.urlRequest
@@ -194,7 +196,6 @@ final class AIService {
                 }
                 request.httpBody = requestData
 
-                // Log the request
                 AILogger.logRequest(
                     gameID: gameID,
                     color: color,
@@ -204,9 +205,10 @@ final class AIService {
                     requestBody: requestData
                 )
 
+                print("[AIService] Attempt \(attempt + 1)/\(AIService.maxRetries) — sending request...")
+
                 let (data, response) = try await URLSession.shared.data(for: request)
 
-                // Log the response
                 AILogger.logResponse(
                     gameID: gameID,
                     color: color,
@@ -219,6 +221,7 @@ final class AIService {
                 guard let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode) else {
                     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    print("[AIService] HTTP \(statusCode) error")
                     throw AIError.httpError(statusCode: statusCode)
                 }
 
@@ -226,7 +229,8 @@ final class AIService {
                 let tokenUsage = extractTokenUsage(from: data, providerType: preparedRequest.providerType)
                 let rawResponseText = String(data: data, encoding: .utf8) ?? "(binary data)"
 
-                // Build activity log
+                print("[AIService] Response move text: \"\(moveText)\"")
+
                 lastActivityLog = AIActivityLog(
                     systemPrompt: systemMessage,
                     userPrompt: userMessage,
@@ -242,8 +246,17 @@ final class AIService {
 
                 // Parse the move
                 guard let parsed = PGNFormatter.parseAIMoveNotation(moveText, on: board) else {
+                    let reason = "could not parse notation"
+                    let correction = AIService.correctionPrompt(badMove: moveText, reason: reason, board: board)
+                    print("[AIService] PARSE FAILURE: \"\(moveText)\" — sending correction")
+                    print("[AIService] Correction: \(correction)")
+
+                    // Append the failed exchange and correction to conversation
+                    conversationMessages.append(ConversationMessage(role: .assistant, content: moveText))
+                    conversationMessages.append(ConversationMessage(role: .user, content: correction))
+
                     let penalty = AIPenalty(
-                        reason: "Could not parse move notation: '\(moveText)' (attempt \(attempt + 1))",
+                        reason: "Could not parse: '\(moveText)' (attempt \(attempt + 1))",
                         severity: .warning,
                         timestamp: Date()
                     )
@@ -259,8 +272,16 @@ final class AIService {
                     promotion: parsed.promotion,
                     on: board
                 ) else {
+                    let reason = "not a legal move"
+                    let correction = AIService.correctionPrompt(badMove: moveText, reason: reason, board: board)
+                    print("[AIService] ILLEGAL MOVE: \"\(moveText)\" (\(parsed.from)->\(parsed.to)) — sending correction")
+                    print("[AIService] Correction: \(correction)")
+
+                    conversationMessages.append(ConversationMessage(role: .assistant, content: moveText))
+                    conversationMessages.append(ConversationMessage(role: .user, content: correction))
+
                     let penalty = AIPenalty(
-                        reason: "Illegal move: '\(moveText)' from \(parsed.from) to \(parsed.to) (attempt \(attempt + 1))",
+                        reason: "Illegal: '\(moveText)' \(parsed.from)->\(parsed.to) (attempt \(attempt + 1))",
                         severity: .minor,
                         timestamp: Date()
                     )
@@ -269,16 +290,22 @@ final class AIService {
                     continue
                 }
 
-                // Check/checkmate annotation
+                // Success
                 let newBoard = board.applyingMove(legalMove)
                 let isCheck = MoveValidator.isKingInCheck(color: board.activeColor.opposite, on: newBoard)
                 let isCheckmate = isCheck && MoveValidator.isCheckmate(on: newBoard)
                 let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate)
 
+                print("[AIService] SUCCESS: \(legalMove.from)\(legalMove.to) (check=\(isCheck), checkmate=\(isCheckmate))")
+                print("[AIService] Penalties: \(penalties.count), Retries: \(retries)")
+                print("[AIService] ====== END REQUEST ======")
+
                 return (annotatedMove, penalties, retries, lastActivityLog)
 
             } catch {
                 let label = error is AIError ? "AI error" : "Network error"
+                print("[AIService] ERROR attempt \(attempt + 1): \(label) — \(error.localizedDescription)")
+
                 let penalty = AIPenalty(
                     reason: "\(label): \(error.localizedDescription) (attempt \(attempt + 1))",
                     severity: attempt >= AIService.maxRetries - 1 ? .critical : .major,
@@ -287,6 +314,8 @@ final class AIService {
                 penalties.append(penalty)
                 retries += 1
                 if attempt >= AIService.maxRetries - 1 {
+                    print("[AIService] FATAL: All \(AIService.maxRetries) attempts failed")
+                    print("[AIService] ====== END REQUEST (FAILURE) ======")
                     throw AIServiceFailure(
                         underlyingError: error,
                         penalties: penalties,
@@ -297,6 +326,10 @@ final class AIService {
             }
         }
 
+        print("[AIService] FATAL: Exhausted \(AIService.maxRetries) attempts (parse/illegal failures)")
+        print("[AIService] All penalties: \(penalties.map(\.reason).joined(separator: "; "))")
+        print("[AIService] ====== END REQUEST (TOO MANY RETRIES) ======")
+
         throw AIServiceFailure(
             underlyingError: AIError.tooManyRetries,
             penalties: penalties,
@@ -305,32 +338,47 @@ final class AIService {
         )
     }
 
+    // MARK: - Conversation Message
+
+    private struct ConversationMessage {
+        enum Role { case user, assistant }
+        let role: Role
+        let content: String
+    }
+
     // MARK: - Request Building
 
-    private func buildRequestBody(prepared: PreparedRequest, systemMessage: String, userMessage: String) -> [String: Any] {
+    private func buildConversationBody(prepared: PreparedRequest, systemMessage: String, messages: [ConversationMessage]) -> [String: Any] {
         var body = prepared.baseBody
-        body["stream"] = false // We don't use streaming for move requests
+        body["stream"] = false
+
+        let apiMessages: [[String: Any]] = messages.map { msg in
+            let role = msg.role == .user ? "user" : "assistant"
+            return ["role": role, "content": msg.content]
+        }
 
         switch prepared.providerType {
         case .anthropic:
             body["system"] = systemMessage
-            body["messages"] = [
-                ["role": "user", "content": userMessage]
-            ]
+            body["messages"] = apiMessages
         case .gemini:
-            body["contents"] = [
-                ["role": "user", "parts": [["text": "\(systemMessage)\n\n\(userMessage)"]]]
-            ]
-        case .ollama:
-            body["messages"] = [
-                ["role": "system", "content": systemMessage],
-                ["role": "user", "content": userMessage]
-            ]
-        default: // OpenAI-compatible, Mistral, etc.
-            body["messages"] = [
-                ["role": "system", "content": systemMessage],
-                ["role": "user", "content": userMessage]
-            ]
+            // Gemini: prepend system to first user message, map roles
+            var contents: [[String: Any]] = []
+            var injectedSystem = false
+            for msg in messages {
+                let role = msg.role == .user ? "user" : "model"
+                var content = msg.content
+                if !injectedSystem && msg.role == .user {
+                    content = systemMessage + "\n\n" + content
+                    injectedSystem = true
+                }
+                contents.append(["role": role, "parts": [["text": content]]])
+            }
+            body["contents"] = contents
+        default: // OpenAI-compatible, Ollama, Mistral, etc.
+            var allMessages: [[String: Any]] = [["role": "system", "content": systemMessage]]
+            allMessages.append(contentsOf: apiMessages)
+            body["messages"] = allMessages
         }
 
         return body
@@ -486,7 +534,7 @@ final class AIService {
 
 /// Nonisolated constants for AI configuration.
 enum AIConstants {
-    static let maxRetries = 3
+    static let maxRetries = 25
 }
 
 // MARK: - AI Service Failure
