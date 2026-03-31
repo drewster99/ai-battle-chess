@@ -109,6 +109,10 @@ struct MoveHistoryView: View {
     }
 
     private func sanForMove(at index: Int) -> String {
+        if index < engine.moveSANCache.count {
+            return engine.moveSANCache[index]
+        }
+        // Fallback to dynamic computation if cache is not yet populated
         guard index < engine.moveHistory.count && index < engine.boardStates.count else { return "?" }
         return PGNFormatter.moveToSAN(engine.moveHistory[index], on: engine.boardStates[index])
     }

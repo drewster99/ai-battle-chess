@@ -203,6 +203,15 @@ struct ContentView: View {
                     .foregroundStyle(movePairs >= 40 ? .orange : .secondary)
             }
 
+            // Threefold repetition counter (only show when position repeated)
+            let repCount = engine.currentPositionRepetitionCount
+            if repCount > 1 {
+                Divider().frame(height: 14)
+                Text("Repetition: \(repCount)/3")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(repCount >= 2 ? .orange : .secondary)
+            }
+
             Spacer()
 
             // Session stats

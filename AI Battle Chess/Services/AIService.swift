@@ -54,7 +54,7 @@ final class AIService {
 
         let outputResponseFormat = isAIAppleIntelligence
         ? """
-        thoughtLogic String - your through process
+        thoughtLogic String - your thought process
         move String: A single line of text, no leading/trailing whitespace, in one of these two formats:
         - Format 1: <move>
         - Format 2: <move> {<optional comment>}
@@ -96,7 +96,7 @@ final class AIService {
         - Place the pieces on their starting squares:
             - **Back Row (from the player's perspective):** King on e1, Queen
         on d1, Rooks on a1 and h1, Bishops on c1 and g1, Knights on b1 and
-        f1, and Pawns on e2, d2, c2, and b2.
+        f1, and Pawns on a2, b2, c2, d2, e2, f2, g2, and h2.
             - White queen is on a white square, black queen is on a dark square
 
         ### Basic Rules:
@@ -110,10 +110,10 @@ final class AIService {
         and then one square perpendicular, or vice versa. Knights can jump
         over other pieces.
         - **Pawn:** Moves forward one square, but captures diagonally forward. On
-        its first move, a pawn can move two squares forward. Pans can never move backward.
+        its first move, a pawn can move two squares forward. Pawns can never move backward.
 
         2. **Special Moves:**
-        - **Castling:** Castling is a special move where both the king and a rock
+        - **Castling:** Castling is a special move where both the king and a rook
         are moved.
           - What is castling?
             - The king moves two spaces toward the rook
@@ -147,20 +147,23 @@ final class AIService {
             - King: 99999999 (priceless)
         
         4. **Promotion of Pawn**
-        - If a pawn advances all the way across the board to the opponent's back row (row 8 when playing as black, or row 1 when playing as white), the pawn can be promoted to any other piece. Typically a Queen is chosen, since it has the combined power of all other pieces but the rook. 
+        - If a pawn advances all the way across the board to the opponent's back row (row 8 when playing as black, or row 1 when playing as white), the pawn can be promoted to any other piece. Typically a Queen is chosen, since it has the combined power of the rook and bishop.
         - Indicating pawn promotion
           - Append "=Q" to the end of the move.  Examples:
             - Move from e7 to e8 and promote to Queen: e7e8q
             - Move from b2 to a1 (capturing) and promoting to Knight: b2a1n
         
         5. **50 Move Rule**
-        - If 50 consecutive turns by each player (100 total moves, which are called 'half moves') happen without the movement
-        of any pawns and without any pieces being captured, the nextmove will automatically be indicated as a draw by, like this: "½–½ {50 move rule}" as their move.
-        
-        6. **Winning the Game:**
+        - If 50 consecutive moves by each player (100 half-moves) happen without the movement
+        of any pawns and without any pieces being captured, the next move will automatically be indicated as a draw, like this: "½–½ {50 move rule}" as their move.
+
+        6. **Threefold Repetition**
+        - If the same board position occurs three times during a game (same piece placement, same player to move, same castling rights, same en passant possibilities), the game is automatically drawn.
+
+        7. **Winning the Game:**
         - **Checkmate:** The king is in check and cannot escape capture.
-        - **Stalemate:** A situation where the player cannot move legally
-        or their king is in check but cannot be captured.
+        - **Stalemate:** A situation where the player whose turn it is has no legal moves
+        and their king is NOT in check. This results in a draw.
         - **Draw:** Possible through stalemate, threefold repetition,
         insufficient material, or agreed upon by players.
 
@@ -186,7 +189,7 @@ final class AIService {
         """
     }
 
-    static func boardStatePrompt(board: ChessBoard) -> String {
+    static func boardStatePrompt(board: ChessBoard, positionRepetitionCount: Int = 1) -> String {
         var prompt = ""
 
         // ASCII board
@@ -212,6 +215,11 @@ final class AIService {
         if board.halfMoveClock > 0 {
             let fullMoves = board.halfMoveClock / 2
             prompt += "\n50-move rule: \(fullMoves)/50 consecutive move pairs without a pawn move or capture.\n"
+        }
+
+        // Threefold repetition counter
+        if positionRepetitionCount > 1 {
+            prompt += "\nThreefold repetition: This position has occurred \(positionRepetitionCount)/3 times. At 3, the game is automatically drawn.\n"
         }
 
         // Legal moves list — the AI MUST pick one of these
@@ -284,7 +292,8 @@ final class AIService {
         board: ChessBoard,
         color: PieceColor,
         gameID: UUID,
-        gameTurnIndex: Int
+        gameTurnIndex: Int,
+        positionRepetitionCount: Int = 1
     ) async throws -> (result: AIMoveResult, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
         var penalties: [AIPenalty] = []
         var retries = 0
@@ -298,7 +307,7 @@ final class AIService {
         let modelLabel = config?.name ?? providerModel
 
         let systemMessage = AIService.systemPrompt(for: color, board: board)
-        let userMessage = AIService.boardStatePrompt(board: board)
+        let userMessage = AIService.boardStatePrompt(board: board, positionRepetitionCount: positionRepetitionCount)
 
         print("[AIService] ====== REQUEST ======")
         print("[AIService] \(modelLabel) | \(color.displayName) | Turn \(gameTurnIndex) | Game \(gameID.uuidString.prefix(8))")
@@ -674,20 +683,23 @@ final class AIService {
 
     /// Checks if the AI response indicates a resignation or draw claim.
     /// Returns the game result if so, nil if it's a normal move.
+    /// Uses exact matching to avoid false positives from substring matches.
     static func detectSpecialAction(_ text: String, color: PieceColor) -> GameResult? {
-        let lower = text.lowercased()
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        // Resignation: "0-1 {white resigns}" or "1-0 {black resigns}" or just "resign"
-        if lower.contains("resign") || lower.contains("0-1") || lower.contains("1-0") {
-            // The color playing is the one resigning
+        // Resignation by keyword (exact match only)
+        if trimmed == "resign" || trimmed == "resigns" || trimmed == "i resign" {
             return .resignation(winner: color.opposite)
         }
 
-        // Draw claims: "½–½" or "1/2-1/2"
-        if lower.contains("½–½") || lower.contains("½-½") || lower.contains("1/2-1/2") {
-            if lower.contains("50 move") || lower.contains("50-move") || lower.contains("75 move") || lower.contains("75-move") {
-                return .fiftyMoveRule
-            }
+        // Resignation by result code — only accept the code that means THIS color loses
+        let expectedResignCode = color == .white ? "0-1" : "1-0"
+        if trimmed == expectedResignCode {
+            return .resignation(winner: color.opposite)
+        }
+
+        // Draw claims: must equal the draw indicator
+        if trimmed == "½–½" || trimmed == "½-½" || trimmed == "1/2-1/2" {
             return .drawByAgreement
         }
 

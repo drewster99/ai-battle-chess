@@ -67,8 +67,8 @@ struct PGNFormatter {
         pgn += "[Event \"\(event)\"]\n"
         pgn += "[Site \"AI Battle Chess App\"]\n"
         pgn += "[Date \"\(dateString)\"]\n"
-        pgn += "[White \"\(whiteName)\"]\n"
-        pgn += "[Black \"\(blackName)\"]\n"
+        pgn += "[White \"\(escapePGNString(whiteName))\"]\n"
+        pgn += "[Black \"\(escapePGNString(blackName))\"]\n"
         pgn += "[Result \"\(result?.pgnResult ?? "*")\"]\n"
 
         // Extended headers
@@ -103,6 +103,9 @@ struct PGNFormatter {
         // Result
         if let result {
             pgn += " \(result.pgnResult)"
+            if let comment = result.pgnResultComment {
+                pgn += " {\(comment)}"
+            }
         }
 
         return pgn
@@ -234,7 +237,8 @@ struct PGNFormatter {
             }
         }
 
-        return candidates.first.map { ($0.from, $0.to, $0.promotionType ?? promotion) }
+        // Genuinely ambiguous — return nil to force the caller to request clarification
+        return nil
     }
 
     // MARK: - Helpers
@@ -290,5 +294,10 @@ struct PGNFormatter {
         case "K": return .king
         default: return nil
         }
+    }
+
+    private static func escapePGNString(_ string: String) -> String {
+        string.replacingOccurrences(of: "\\", with: "\\\\")
+              .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }

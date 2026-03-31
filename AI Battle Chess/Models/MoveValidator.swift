@@ -61,11 +61,16 @@ struct MoveValidator: Sendable {
     // MARK: - Game State Detection
 
     /// Returns true if the active color has at least one legal move.
-    /// Early-exits as soon as a single legal move is found, avoiding generating all moves.
+    /// Short-circuits as soon as a single legal move is found for any piece,
+    /// without generating all pseudo-legal moves for that piece.
     static func hasAnyLegalMove(for board: ChessBoard) -> Bool {
         for (piece, position) in board.allPieces(color: board.activeColor) {
-            if !legalMoves(for: piece, at: position, on: board).isEmpty {
-                return true
+            let pseudoLegal = pseudoLegalMoves(for: piece, at: position, on: board)
+            for move in pseudoLegal {
+                let newBoard = board.applyingMove(move)
+                if !isKingInCheck(color: piece.color, on: newBoard) {
+                    return true
+                }
             }
         }
         return false
@@ -126,8 +131,13 @@ struct MoveValidator: Sendable {
         board.halfMoveClock >= 100
     }
 
+    /// Detects threefold repetition using the provided position count map.
+    static func isThreefoldRepetition(board: ChessBoard, positionCounts: [ChessBoard.PositionKey: Int]) -> Bool {
+        (positionCounts[board.positionKey] ?? 0) >= 3
+    }
+
     /// Detects any game-ending condition and returns the result.
-    static func detectGameResult(on board: ChessBoard) -> GameResult? {
+    static func detectGameResult(on board: ChessBoard, positionCounts: [ChessBoard.PositionKey: Int] = [:]) -> GameResult? {
         if isCheckmate(on: board) {
             return .checkmate(winner: board.activeColor.opposite)
         }
@@ -136,6 +146,9 @@ struct MoveValidator: Sendable {
         }
         if isInsufficientMaterial(on: board) {
             return .insufficientMaterial
+        }
+        if isThreefoldRepetition(board: board, positionCounts: positionCounts) {
+            return .threefoldRepetition
         }
         if isFiftyMoveRule(on: board) {
             return .fiftyMoveRule

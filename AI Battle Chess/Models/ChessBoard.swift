@@ -25,6 +25,50 @@ struct ChessBoard: Equatable, Sendable {
     /// Current side to move
     var activeColor: PieceColor = .white
 
+    // MARK: - Position Key (for threefold repetition detection)
+
+    /// Captures the aspects of board state that define a "position" under FIDE rules:
+    /// piece placement, active color, castling rights, and en passant target.
+    struct PositionKey: Hashable {
+        let pieceLayout: [UInt8]
+        let activeColor: PieceColor
+        let whiteCanCastleKingside: Bool
+        let whiteCanCastleQueenside: Bool
+        let blackCanCastleKingside: Bool
+        let blackCanCastleQueenside: Bool
+        let enPassantTarget: BoardPosition?
+    }
+
+    var positionKey: PositionKey {
+        var encoded = [UInt8](repeating: 0, count: 64)
+        for file in 0..<8 {
+            for rank in 0..<8 {
+                if let piece = squares[file][rank] {
+                    let colorVal: UInt8 = piece.color == .white ? 0 : 6
+                    let typeVal: UInt8
+                    switch piece.type {
+                    case .pawn: typeVal = 1
+                    case .knight: typeVal = 2
+                    case .bishop: typeVal = 3
+                    case .rook: typeVal = 4
+                    case .queen: typeVal = 5
+                    case .king: typeVal = 6
+                    }
+                    encoded[file * 8 + rank] = colorVal + typeVal
+                }
+            }
+        }
+        return PositionKey(
+            pieceLayout: encoded,
+            activeColor: activeColor,
+            whiteCanCastleKingside: whiteCanCastleKingside,
+            whiteCanCastleQueenside: whiteCanCastleQueenside,
+            blackCanCastleKingside: blackCanCastleKingside,
+            blackCanCastleQueenside: blackCanCastleQueenside,
+            enPassantTarget: enPassantTarget
+        )
+    }
+
     // MARK: - Initialization
 
     init() {
@@ -47,7 +91,10 @@ struct ChessBoard: Equatable, Sendable {
     }
 
     mutating func setPiece(_ piece: ChessPiece?, at position: BoardPosition) {
-        guard position.isValid else { return }
+        guard position.isValid else {
+            assertionFailure("Attempted to set piece at invalid position \(position)")
+            return
+        }
         squares[position.file][position.rank] = piece
     }
 
@@ -60,6 +107,7 @@ struct ChessBoard: Equatable, Sendable {
                 }
             }
         }
+        assertionFailure("King not found for \(color) — board state is corrupt")
         return nil
     }
 

@@ -60,11 +60,12 @@ struct ChessBoardView: View {
     // MARK: - Board Grid
 
     private var boardGrid: some View {
-        VStack(spacing: 0) {
+        let displayBoard = engine.displayBoard
+        return VStack(spacing: 0) {
             ForEach((0..<8).reversed(), id: \.self) { rank in
                 HStack(spacing: 0) {
                     ForEach(0..<8, id: \.self) { file in
-                        squareView(file: file, rank: rank)
+                        squareView(file: file, rank: rank, displayBoard: displayBoard)
                     }
                 }
             }
@@ -100,10 +101,9 @@ struct ChessBoardView: View {
     // MARK: - Square View
 
     @ViewBuilder
-    private func squareView(file: Int, rank: Int) -> some View {
+    private func squareView(file: Int, rank: Int, displayBoard: ChessBoard) -> some View {
         let position = BoardPosition(file: file, rank: rank)
         let isLight = (file + rank) % 2 != 0
-        let displayBoard = engine.displayBoard
         let piece = displayBoard.piece(at: position)
 
         let isSelected = engine.selectedSquare == position
@@ -183,10 +183,10 @@ struct ChessBoardView: View {
                             // whose turn it was when promotion was triggered)
                             let promoColor: PieceColor = {
                                 if let from = engine.pendingPromotion?.from,
-                                   let piece = engine.board.piece(at: from) {
+                                   let piece = engine.displayBoard.piece(at: from) {
                                     return piece.color
                                 }
-                                return engine.board.activeColor
+                                return engine.displayBoard.activeColor
                             }()
                             let tempPiece = ChessPiece(color: promoColor, type: type)
                             PieceView(piece: tempPiece, size: squareSize * 1.2)

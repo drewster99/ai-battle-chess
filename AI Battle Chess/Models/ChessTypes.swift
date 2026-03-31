@@ -193,6 +193,7 @@ enum GameResult: Equatable, Sendable, Codable {
     case stalemate
     case insufficientMaterial
     case fiftyMoveRule
+    case threefoldRepetition
     case resignation(winner: PieceColor)
     case drawByAgreement
 
@@ -206,6 +207,8 @@ enum GameResult: Equatable, Sendable, Codable {
             return "Insufficient Material - Draw!"
         case .fiftyMoveRule:
             return "50-Move Rule - Draw!"
+        case .threefoldRepetition:
+            return "Threefold Repetition - Draw!"
         case .resignation(let winner):
             return "\(winner.opposite.displayName) resigned. \(winner.displayName) wins!"
         case .drawByAgreement:
@@ -217,8 +220,18 @@ enum GameResult: Equatable, Sendable, Codable {
         switch self {
         case .checkmate(let winner), .resignation(let winner):
             return winner == .white ? "1-0" : "0-1"
-        case .stalemate, .insufficientMaterial, .fiftyMoveRule, .drawByAgreement:
+        case .stalemate, .insufficientMaterial, .fiftyMoveRule, .threefoldRepetition, .drawByAgreement:
             return "1/2-1/2"
+        }
+    }
+
+    var pgnResultComment: String? {
+        switch self {
+        case .threefoldRepetition: return "threefold repetition"
+        case .fiftyMoveRule: return "50 move rule"
+        case .insufficientMaterial: return "insufficient material"
+        case .stalemate: return "stalemate"
+        default: return nil
         }
     }
 }

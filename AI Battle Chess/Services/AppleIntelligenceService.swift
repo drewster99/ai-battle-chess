@@ -32,7 +32,8 @@ final class AppleIntelligenceService {
         board: ChessBoard,
         color: PieceColor,
         gameID: UUID,
-        gameTurnIndex: Int
+        gameTurnIndex: Int,
+        positionRepetitionCount: Int = 1
     ) async throws -> (result: AIMoveResult, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
         guard AppleIntelligenceService.isAvailable else {
             print("[AppleIntelligence] ERROR: Apple Intelligence is not available on this device")
@@ -45,7 +46,7 @@ final class AppleIntelligenceService {
         var attempts: [AITurnAttempt] = []
 
         let systemPrompt = AIService.systemPrompt(for: color, isAppleIntelligence: true, board: board)
-        let userPrompt = AIService.boardStatePrompt(board: board)
+        let userPrompt = AIService.boardStatePrompt(board: board, positionRepetitionCount: positionRepetitionCount)
 
         print("[AppleIntelligence] ====== REQUEST ======")
         print("[AppleIntelligence] Color: \(color.displayName) | Turn: \(gameTurnIndex) | Game: \(gameID.uuidString.prefix(8))")

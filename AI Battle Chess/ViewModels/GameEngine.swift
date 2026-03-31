@@ -40,6 +40,8 @@ final class GameEngine {
     var currentAIColor: PieceColor? = nil
     var statistics: GameStatistics = GameStatistics()
     var currentAIActivity: [PieceColor: AIActivityLog] = [:]
+    var positionCounts: [ChessBoard.PositionKey: Int] = [:]
+    private(set) var moveSANCache: [String] = []
 
     // MARK: - Animation
 
@@ -95,6 +97,11 @@ final class GameEngine {
         return durations.reduce(0, +) / Double(durations.count)
     }
 
+    /// Number of times the current board position has occurred (for threefold repetition tracking).
+    var currentPositionRepetitionCount: Int {
+        positionCounts[board.positionKey] ?? 1
+    }
+
     /// Elapsed time since the game started.
     var elapsedTime: TimeInterval {
         Date().timeIntervalSince(statistics.gameStartTime)
@@ -140,6 +147,8 @@ final class GameEngine {
 
         aiTask?.cancel()
         aiTask = nil
+        animationTask?.cancel()
+        animationTask = nil
 
         currentGameID = UUID()
         board = ChessBoard()
@@ -165,6 +174,8 @@ final class GameEngine {
         statistics = GameStatistics()
         statistics.gameStartTime = Date()
         statistics.turnStartTime = Date()
+        positionCounts = [board.positionKey: 1]
+        moveSANCache = []
 
         // Update material values
         statistics.materialValue[.white] = board.materialValue(for: .white)
@@ -331,12 +342,16 @@ final class GameEngine {
         board = newBoard
         moveHistory.append(annotatedMove)
         lastMove = annotatedMove
+        positionCounts[board.positionKey, default: 0] += 1
+
+        // Cache SAN string
+        moveSANCache.append(PGNFormatter.moveToSAN(annotatedMove, on: boardStates[boardStates.count - 1]))
 
         // Update statistics
         updateStatistics(for: annotatedMove)
 
         // Check game end
-        if let result = MoveValidator.detectGameResult(on: board) {
+        if let result = MoveValidator.detectGameResult(on: board, positionCounts: positionCounts) {
             gameResult = result
             isGameActive = false
             statusMessage = result.displayText
@@ -378,6 +393,7 @@ final class GameEngine {
         let color = board.activeColor
         let gameTurnIndex = moveCount(for: color)
         let gameID = currentGameID
+        let repetitionCount = currentPositionRepetitionCount
 
         aiTask = Task { [weak self] in
             guard let self else { return }
@@ -390,7 +406,8 @@ final class GameEngine {
                         board: boardSnapshot,
                         color: color,
                         gameID: gameID,
-                        gameTurnIndex: gameTurnIndex
+                        gameTurnIndex: gameTurnIndex,
+                        positionRepetitionCount: repetitionCount
                     )
                 } else if let configID = player.aiConfigurationID {
                     aiResult = try await aiService.requestMove(
@@ -398,13 +415,14 @@ final class GameEngine {
                         board: boardSnapshot,
                         color: color,
                         gameID: gameID,
-                        gameTurnIndex: gameTurnIndex
+                        gameTurnIndex: gameTurnIndex,
+                        positionRepetitionCount: repetitionCount
                     )
                 } else {
                     throw AIError.noConfigurationSelected
                 }
 
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, gameID == self.currentGameID else { return }
 
                 // Record penalties
                 for penalty in aiResult.penalties {
@@ -521,7 +539,8 @@ final class GameEngine {
                 viewingMoveIndex = current - 1
             }
         } else if !moveHistory.isEmpty {
-            viewingMoveIndex = moveHistory.count - 1
+            // Show the board one move before the current live position
+            viewingMoveIndex = max(0, moveHistory.count - 2)
         }
     }
 
@@ -591,7 +610,7 @@ final class GameEngine {
             } catch is CancellationError {
                 return
             } catch {
-                // Unexpected error
+                print("[GameEngine] Unexpected animation error: \(error)")
             }
             guard !Task.isCancelled else { return }
             if self.animatingMove?.id == moveID {
@@ -614,6 +633,8 @@ final class GameEngine {
         let statusMessage: String
         let currentGameID: UUID
         let currentAIActivity: [PieceColor: AIActivityLog]
+        let positionCounts: [ChessBoard.PositionKey: Int]
+        let moveSANCache: [String]
     }
 
     private var liveGameSnapshot: LiveGameSnapshot? = nil
@@ -666,7 +687,9 @@ final class GameEngine {
             lastMove: lastMove,
             statusMessage: statusMessage,
             currentGameID: currentGameID,
-            currentAIActivity: currentAIActivity
+            currentAIActivity: currentAIActivity,
+            positionCounts: positionCounts,
+            moveSANCache: moveSANCache
         )
     }
 
@@ -685,6 +708,8 @@ final class GameEngine {
         statusMessage = snapshot.statusMessage
         currentGameID = snapshot.currentGameID
         currentAIActivity = snapshot.currentAIActivity
+        positionCounts = snapshot.positionCounts
+        moveSANCache = snapshot.moveSANCache
         viewingMoveIndex = nil
         animatingMove = nil
         animatingFileDelta = 0
@@ -730,6 +755,8 @@ final class GameEngine {
         errorMessage = nil
         isAIThinking = false
         statistics = GameStatistics()
+        positionCounts = [board.positionKey: 1]
+        moveSANCache = []
 
         // Parse PGN moves
         let moves = parsePGNMoves(pgn)
@@ -756,13 +783,15 @@ final class GameEngine {
             let annotatedMove = legalMove.withCheckStatus(isCheck: isCheck, isCheckmate: isCheckmate)
 
             boardStates.append(board)
+            moveSANCache.append(PGNFormatter.moveToSAN(annotatedMove, on: board))
             board = newBoard
             moveHistory.append(annotatedMove)
+            positionCounts[board.positionKey, default: 0] += 1
             updateStatistics(for: annotatedMove)
         }
 
         // Check for game result
-        if let result = MoveValidator.detectGameResult(on: board) {
+        if let result = MoveValidator.detectGameResult(on: board, positionCounts: positionCounts) {
             gameResult = result
             statusMessage = result.displayText
         } else {
@@ -779,10 +808,14 @@ final class GameEngine {
         let lines = pgn.components(separatedBy: .newlines)
         let moveText = lines.filter { !$0.hasPrefix("[") && !$0.isEmpty }.joined(separator: " ")
 
-        // Remove comments {}, variations (), and result
+        // Remove comments {} and variations () — repeat for nested structures
         var cleaned = moveText
-        cleaned = cleaned.replacing(/\{[^}]*\}/, with: "")
-        cleaned = cleaned.replacing(/\([^)]*\)/, with: "")
+        var previous = ""
+        while previous != cleaned {
+            previous = cleaned
+            cleaned = cleaned.replacing(/\{[^}]*\}/, with: "")
+            cleaned = cleaned.replacing(/\([^)]*\)/, with: "")
+        }
         cleaned = cleaned.replacingOccurrences(of: "1-0", with: "")
         cleaned = cleaned.replacingOccurrences(of: "0-1", with: "")
         cleaned = cleaned.replacingOccurrences(of: "1/2-1/2", with: "")
@@ -802,6 +835,7 @@ final class GameEngine {
         aiTask?.cancel()
         aiTask = nil
         isAIThinking = false
+        currentAIColor = nil
         let result = GameResult.resignation(winner: color.opposite)
         gameResult = result
         isGameActive = false

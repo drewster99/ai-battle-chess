@@ -44,6 +44,7 @@ final class GameHistoryManager {
 
     private var gamesRootURL: URL {
         guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            assertionFailure("Application Support directory not found — falling back to temporary directory")
             return FileManager.default.temporaryDirectory
                 .appendingPathComponent(Self.appSupportDirectoryName)
                 .appendingPathComponent(Self.gamesDirectoryName)
@@ -75,6 +76,9 @@ final class GameHistoryManager {
     /// Creates the game's directory if it does not already exist. The record is inserted
     /// into `gameRecords` at the correct position to maintain descending start-time order.
     func save(_ record: GameRecord) {
+        // Prevent duplicate insertion
+        guard !gameRecords.contains(where: { $0.id == record.id }) else { return }
+
         let directory = gameDirectory(for: record.id)
         let fileURL = directory.appendingPathComponent(Self.gameFileName)
 
@@ -86,9 +90,6 @@ final class GameHistoryManager {
             print("[GameHistoryManager] Failed to save game \(record.id): \(error)")
             return
         }
-
-        // Prevent duplicate insertion
-        guard !gameRecords.contains(where: { $0.id == record.id }) else { return }
 
         // Insert while maintaining descending startTime order
         if let insertionIndex = gameRecords.firstIndex(where: { $0.startTime < record.startTime }) {
@@ -121,6 +122,10 @@ final class GameHistoryManager {
             )
 
             for subdirectory in subdirectories {
+                // Skip non-directory entries
+                let resourceValues = try? subdirectory.resourceValues(forKeys: [.isDirectoryKey])
+                guard resourceValues?.isDirectory == true else { continue }
+
                 let gameFile = subdirectory.appendingPathComponent(Self.gameFileName)
                 guard fileManager.fileExists(atPath: gameFile.path) else {
                     continue
@@ -158,15 +163,18 @@ final class GameHistoryManager {
     ///   - black: The black player's name.
     /// - Returns: Matching records, sorted by start time descending.
     func gamesBetween(white: String, black: String) -> [GameRecord] {
-        gameRecords.filter { $0.whitePlayerName == white && $0.blackPlayerName == black }
+        gameRecords.filter {
+            ($0.whitePlayerName == white && $0.blackPlayerName == black) ||
+            ($0.whitePlayerName == black && $0.blackPlayerName == white)
+        }
     }
 
-    /// Returns win/draw tallies for the given matchup.
+    /// Returns win/draw tallies for the given matchup, regardless of color assignment in past games.
     ///
     /// - Parameters:
-    ///   - white: The white player's name.
-    ///   - black: The black player's name.
-    /// - Returns: A tuple of white wins, black wins, and draws.
+    ///   - white: The current white player's name.
+    ///   - black: The current black player's name.
+    /// - Returns: A tuple counting wins by each player and draws across all their games.
     func previousResults(white: String, black: String) -> (whiteWins: Int, blackWins: Int, draws: Int) {
         let matchups = gamesBetween(white: white, black: black)
 
@@ -177,12 +185,19 @@ final class GameHistoryManager {
         for record in matchups {
             switch record.result {
             case .checkmate(let winner), .resignation(let winner):
-                if winner == .white {
+                // Map winner to the current matchup's perspective
+                let whitePlayerWon: Bool
+                if record.whitePlayerName == white {
+                    whitePlayerWon = (winner == .white)
+                } else {
+                    whitePlayerWon = (winner == .black)
+                }
+                if whitePlayerWon {
                     whiteWins += 1
                 } else {
                     blackWins += 1
                 }
-            case .stalemate, .insufficientMaterial, .fiftyMoveRule, .drawByAgreement:
+            case .stalemate, .insufficientMaterial, .fiftyMoveRule, .threefoldRepetition, .drawByAgreement:
                 draws += 1
             }
         }
