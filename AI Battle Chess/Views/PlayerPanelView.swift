@@ -162,7 +162,7 @@ struct PlayerPanelView: View {
                     .foregroundStyle(.secondary)
             }
 
-            let totalGames = engine.gameHistoryManager.totalGamesForPlayer(name: player.name) + (engine.isGameActive ? 1 : 0)
+            let totalGames = engine.gameHistoryManager.totalGamesForPlayer(id: player.humanPlayerID, name: player.name) + (engine.isGameActive ? 1 : 0)
             Label("\(totalGames)", systemImage: "number")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
