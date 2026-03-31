@@ -175,7 +175,7 @@ struct MoveValidator: Sendable {
         let oneStep = BoardPosition(file: position.file, rank: position.rank + direction)
         if oneStep.isValid && board.piece(at: oneStep) == nil {
             if oneStep.rank == promotionRank {
-                for promoType: PieceType in [.queen, .rook, .bishop, .knight] {
+                for promoType: PieceType in [.queen, .knight] {
                     moves.append(ChessMove(piece: piece, from: position, to: oneStep, promotionType: promoType))
                 }
             } else {
@@ -198,7 +198,7 @@ struct MoveValidator: Sendable {
 
             if let target = board.piece(at: capturePos), target.color != piece.color {
                 if capturePos.rank == promotionRank {
-                    for promoType: PieceType in [.queen, .rook, .bishop, .knight] {
+                    for promoType: PieceType in [.queen, .knight] {
                         moves.append(ChessMove(piece: piece, from: position, to: capturePos, capturedPiece: target, promotionType: promoType))
                     }
                 } else {

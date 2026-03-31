@@ -215,9 +215,12 @@ final class AIService {
         }
 
         // Legal moves list — the AI MUST pick one of these
-        let moveStrings = legalMovesStringList(for: board)
-        prompt += "\nYour legal moves: \(moveStrings.joined(separator: ", "))\n"
-        prompt += "Reply with exactly one move from this list.\n"
+        var moveStrings = legalMovesStringList(for: board)
+        // Resign is always available
+        let resignNotation = board.activeColor == .white ? "0-1" : "1-0"
+        moveStrings.append(resignNotation)
+        prompt += "\nVALID MOVES: \(moveStrings.joined(separator: ", "))\n"
+        prompt += "Respond with exactly one move from this list.\n"
 
         return prompt
     }
@@ -236,7 +239,7 @@ final class AIService {
     /// Builds a correction message to send back when the AI picks an illegal/unparseable move.
     static func correctionPrompt(badMove: String, reason: String, board: ChessBoard) -> String {
         let legalMoves = legalMovesStringList(for: board)
-        return "Illegal move: \"\(badMove)\" — \(reason). Choose one of: \(legalMoves.joined(separator: ", "))"
+        return "Illegal move: \"\(badMove)\" — \(reason)" + "\nVALID MOVES: \(legalMoves.joined(separator: ", "))\n"
     }
 
     private static func asciiBoard(_ board: ChessBoard) -> String {
