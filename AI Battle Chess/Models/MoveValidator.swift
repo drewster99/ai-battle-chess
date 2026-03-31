@@ -121,9 +121,15 @@ struct MoveValidator: Sendable {
         return false
     }
 
-    /// Detects 50-move rule.
-    static func isFiftyMoveRule(on board: ChessBoard) -> Bool {
-        board.halfMoveClock >= 100 // 100 half-moves = 50 full moves
+    /// Detects automatic draw under the 75-move rule (150 half-moves).
+    /// The 50-move rule (100 half-moves) allows a draw *claim* but is not automatic.
+    static func isSeventyFiveMoveRule(on board: ChessBoard) -> Bool {
+        board.halfMoveClock >= 150
+    }
+
+    /// Returns true if the 50-move draw claim is available (100+ half-moves without pawn move or capture).
+    static func isFiftyMoveClaimAvailable(on board: ChessBoard) -> Bool {
+        board.halfMoveClock >= 100
     }
 
     /// Detects any game-ending condition and returns the result.
@@ -137,8 +143,8 @@ struct MoveValidator: Sendable {
         if isInsufficientMaterial(on: board) {
             return .insufficientMaterial
         }
-        if isFiftyMoveRule(on: board) {
-            return .fiftyMoveRule
+        if isSeventyFiveMoveRule(on: board) {
+            return .fiftyMoveRule // Automatic draw at 75 full moves
         }
         return nil
     }

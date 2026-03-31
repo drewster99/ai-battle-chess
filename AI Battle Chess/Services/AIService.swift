@@ -210,6 +210,16 @@ final class AIService {
             prompt += "WARNING: Your king is in CHECK! You must resolve the check.\n"
         }
 
+        // 50/75-move rule counter
+        if board.halfMoveClock > 0 {
+            let fullMoves = board.halfMoveClock / 2
+            prompt += "\n50-move rule: \(fullMoves) consecutive move pairs without a pawn move or capture."
+            if board.halfMoveClock >= 100 {
+                prompt += " (Draw claim available.)"
+            }
+            prompt += "\n"
+        }
+
         // Legal moves list — the AI MUST pick one of these
         let moveStrings = legalMovesStringList(for: board)
         prompt += "\nYour legal moves: \(moveStrings.joined(separator: ", "))\n"

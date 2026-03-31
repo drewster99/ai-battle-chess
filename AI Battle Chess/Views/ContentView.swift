@@ -193,6 +193,16 @@ struct ContentView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
 
+            // 50-move rule counter (only show when nonzero)
+            let halfMoveClock = engine.displayBoard.halfMoveClock
+            if halfMoveClock > 0 {
+                Divider().frame(height: 14)
+                let movePairs = halfMoveClock / 2
+                Text("50-move: \(movePairs)/75")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(halfMoveClock >= 100 ? .orange : .secondary)
+            }
+
             Spacer()
 
             // Session stats
