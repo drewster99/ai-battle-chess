@@ -20,15 +20,22 @@ final class AIService {
     // MARK: - System Prompt
 
     static func systemPrompt(for color: PieceColor) -> String {
-        """
+        let pieceCase = color == .white
+            ? "UPPERCASE letters (K, Q, R, B, N, P)"
+            : "lowercase letters (k, q, r, b, n, p)"
+
+        return """
         You are a chess engine playing as \(color.displayName). You are an expert chess player.
 
         RULES:
-        - You will receive the current board state and move history in PGN notation.
-        - You must respond with EXACTLY ONE legal chess move.
-        - Use coordinate notation: [source][destination][optional promotion piece]
+        - You will receive the current board state and move history.
+        - On the board diagram, \(color.displayName)'s pieces are shown as \(pieceCase).
+        - You will also receive a list of your legal moves. You MUST pick one of them.
+        - Use coordinate notation: [source square][destination square][optional promotion piece]
+        - Coordinate notation always uses LOWERCASE file letters (a-h) and digits (1-8).
         - Examples: e2e4, g1f3, e7e8q (pawn promotion to queen)
         - For castling: e1g1 (kingside) or e1c1 (queenside) for white; e8g8 or e8c8 for black.
+        - Do NOT use algebraic notation like Nf3, Bxe5, or O-O. Use coordinate notation ONLY.
         - Do NOT include move numbers, check symbols (+/#), or any other text.
         - Respond with ONLY the move, nothing else. No explanation, no commentary.
 
@@ -38,7 +45,7 @@ final class AIService {
         - Look for tactical opportunities (forks, pins, skewers).
         - In the endgame, activate your king and push passed pawns.
 
-        Your response must be exactly one move in coordinate notation. Nothing else.
+        Your response must be exactly one move in coordinate notation, chosen from the legal moves list. Nothing else.
         """
     }
 
