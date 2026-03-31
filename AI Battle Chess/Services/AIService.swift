@@ -381,7 +381,7 @@ final class AIService {
                 print("[AIService] Response move: \"\(moveText)\" comment: \"\(moveComment ?? "(none)")\"")
 
                 // Check for resignation or draw claim before parsing as a move
-                if let specialResult = AIService.detectSpecialAction(rawResponseText, color: color) {
+                if let specialResult = AIService.detectSpecialAction(moveText, color: color) {
                     print("[AIService] SPECIAL ACTION detected: \(specialResult)")
                     print("[AIService] ====== END REQUEST ======")
                     attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: true, errorMessage: nil))
@@ -427,6 +427,7 @@ final class AIService {
                     print("[AIService] PARSE FAILURE: \"\(moveText)\" — sending correction")
 
                     attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: false, errorMessage: reason))
+                    lastActivityLog?.attempts = attempts
                     conversationMessages.append(ConversationMessage(role: .assistant, content: moveText))
                     conversationMessages.append(ConversationMessage(role: .user, content: correction))
 
@@ -448,6 +449,7 @@ final class AIService {
                     print("[AIService] ILLEGAL MOVE: \"\(moveText)\" (\(parsed.from)->\(parsed.to)) — sending correction")
 
                     attempts.append(AITurnAttempt(thinking: nil, moveText: moveText, comment: moveComment, isValid: false, errorMessage: reason))
+                    lastActivityLog?.attempts = attempts
                     conversationMessages.append(ConversationMessage(role: .assistant, content: moveText))
                     conversationMessages.append(ConversationMessage(role: .user, content: correction))
 

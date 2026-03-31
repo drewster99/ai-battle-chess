@@ -162,6 +162,7 @@ final class AppleIntelligenceService {
                     print("[AppleIntelligence] PARSE FAILURE: \"\(cleanedMoveText)\" — sending correction")
 
                     attempts.append(AITurnAttempt(thinking: thinking, moveText: cleanedMoveText, comment: moveComment, isValid: false, errorMessage: reason))
+                    lastActivityLog?.attempts = attempts
                     currentPrompt = correction
                     penalties.append(AIPenalty(reason: "Could not parse: '\(cleanedMoveText)' (attempt \(attempt + 1))", severity: .warning, timestamp: Date()))
                     retries += 1
@@ -183,6 +184,7 @@ final class AppleIntelligenceService {
                     print("[AppleIntelligence] ILLEGAL MOVE: \"\(cleanedMoveText)\" — sending correction")
 
                     attempts.append(AITurnAttempt(thinking: thinking, moveText: cleanedMoveText, comment: moveComment, isValid: false, errorMessage: reason))
+                    lastActivityLog?.attempts = attempts
                     currentPrompt = correction
                     penalties.append(AIPenalty(reason: "Illegal: '\(cleanedMoveText)' \(parsed.from)->\(parsed.to) (attempt \(attempt + 1))", severity: .minor, timestamp: Date()))
                     retries += 1

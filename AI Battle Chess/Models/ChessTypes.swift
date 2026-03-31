@@ -313,14 +313,24 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
 // MARK: - AI Activity Log
 
 /// A single attempt by the AI to produce a move.
-struct AITurnAttempt: Sendable, Equatable, Identifiable {
+struct AITurnAttempt: Sendable, Identifiable {
     let id = UUID()
     let thinking: String?
     let moveText: String
     let comment: String?
     let isValid: Bool
     let errorMessage: String?
+
+    static func == (lhs: AITurnAttempt, rhs: AITurnAttempt) -> Bool {
+        lhs.thinking == rhs.thinking &&
+        lhs.moveText == rhs.moveText &&
+        lhs.comment == rhs.comment &&
+        lhs.isValid == rhs.isValid &&
+        lhs.errorMessage == rhs.errorMessage
+    }
 }
+
+extension AITurnAttempt: Equatable {}
 
 /// Captures the details of a single AI interaction for display and debugging.
 struct AIActivityLog: Sendable, Equatable {

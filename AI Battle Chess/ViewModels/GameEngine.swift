@@ -613,6 +613,7 @@ final class GameEngine {
         let lastMove: ChessMove?
         let statusMessage: String
         let currentGameID: UUID
+        let currentAIActivity: [PieceColor: AIActivityLog]
     }
 
     private var liveGameSnapshot: LiveGameSnapshot? = nil
@@ -664,7 +665,8 @@ final class GameEngine {
             statistics: statistics,
             lastMove: lastMove,
             statusMessage: statusMessage,
-            currentGameID: currentGameID
+            currentGameID: currentGameID,
+            currentAIActivity: currentAIActivity
         )
     }
 
@@ -682,6 +684,7 @@ final class GameEngine {
         lastMove = snapshot.lastMove
         statusMessage = snapshot.statusMessage
         currentGameID = snapshot.currentGameID
+        currentAIActivity = snapshot.currentAIActivity
         viewingMoveIndex = nil
         animatingMove = nil
         animatingFileDelta = 0

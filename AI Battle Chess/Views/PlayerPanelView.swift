@@ -325,7 +325,14 @@ struct PlayerPanelView: View {
                     .foregroundStyle(.orange)
             }
 
-            ForEach(attempts) { attempt in
+            // Show last 10 attempts to avoid performance issues with up to 100 retries
+            let displayAttempts = attempts.count > 10 ? Array(attempts.suffix(10)) : attempts
+            if attempts.count > 10 {
+                Text("(\(attempts.count - 10) earlier attempts hidden)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            ForEach(displayAttempts) { attempt in
                 VStack(alignment: .leading, spacing: 2) {
                     // Thinking (blue)
                     if let thinking = attempt.thinking, !thinking.isEmpty {

@@ -113,8 +113,7 @@ struct ChessBoardView: View {
         let isKingInCheck = isKingInCheckAt(position, on: displayBoard)
 
         // Hide the piece at the destination during animation (it's rendered in the overlay)
-        let isAnimatingTo = engine.animatingMove?.to == position && engine.animatingMove != nil
-        let isAnimatingFrom = engine.animatingMove?.from == position && engine.animatingMove != nil
+        let isAnimatingTo = engine.animatingMove?.to == position
 
         ZStack {
             // Base square color
@@ -147,7 +146,7 @@ struct ChessBoardView: View {
             }
 
             // Piece rendering — skip animated piece (rendered in overlay)
-            if let piece, !isAnimatingTo, !isAnimatingFrom {
+            if let piece, !isAnimatingTo {
                 PieceView(piece: piece, size: squareSize)
             }
         }
@@ -176,7 +175,7 @@ struct ChessBoardView: View {
                     .foregroundStyle(.white)
 
                 HStack(spacing: 12) {
-                    ForEach([PieceType.queen, .rook, .bishop, .knight], id: \.self) { type in
+                    ForEach([PieceType.queen, .knight], id: \.self) { type in
                         Button {
                             engine.selectPromotion(type)
                         } label: {
