@@ -43,6 +43,11 @@ struct PlayerPanelView: View {
         return engine.llmKit.providers.first(where: { $0.id == config.providerID })
     }
 
+    private var appleIntelligenceConfig: AppleIntelligenceConfig? {
+        guard let configID = player.appleIntelligenceConfigID else { return nil }
+        return engine.appleIntelligenceConfigManager.config(byID: configID)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Fixed header (does not scroll)
@@ -153,7 +158,20 @@ struct PlayerPanelView: View {
 
     @ViewBuilder
     private var aiConfigDetails: some View {
-        if player.useAppleIntelligence {
+        if player.useAppleIntelligence, let aiCfg = appleIntelligenceConfig {
+            Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 2) {
+                configRow(label: "Model", value: aiCfg.name)
+                configRow(label: "Sampling", value: aiCfg.samplingDescription)
+                if let temp = aiCfg.temperature {
+                    configRow(label: "Temp", value: String(format: "%.2f", temp))
+                }
+                if let maxTokens = aiCfg.maximumResponseTokens {
+                    configRow(label: "Max tokens", value: "\(maxTokens)")
+                }
+                configRow(label: "Resign", value: player.allowResign ? "Allowed" : "Not allowed")
+            }
+            .font(.caption2)
+        } else if player.useAppleIntelligence {
             Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 2) {
                 configRow(label: "Model", value: "Apple Intelligence (on-device)")
                 configRow(label: "Resign", value: player.allowResign ? "Allowed" : "Not allowed")

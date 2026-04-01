@@ -405,7 +405,10 @@ struct ContentView: View {
                             .font(.title3.italic())
                             .foregroundStyle(.blue)
                     } else if player.useAppleIntelligence {
-                        Text("Apple Intelligence")
+                        let aiConfigName = player.appleIntelligenceConfigID
+                            .flatMap { engine.appleIntelligenceConfigManager.config(byID: $0) }?.name
+                            ?? "Apple Intelligence"
+                        Text(aiConfigName)
                             .font(.title3.italic())
                             .foregroundStyle(.blue)
                     }

@@ -266,6 +266,89 @@ struct HumanPlayer: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+// MARK: - Apple Intelligence Configuration
+
+/// Sampling strategy for Apple Intelligence on-device generation.
+enum AISamplingMode: Sendable, Equatable, Hashable {
+    case greedy
+    case randomMass(Double)   // probabilityThreshold (0.0–1.0)
+    case randomTopN(Int)      // top-k token count
+}
+
+extension AISamplingMode: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case kind, value
+    }
+
+    private enum Kind: String, Codable {
+        case greedy, randomMass, randomTopN
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .greedy:
+            try container.encode(Kind.greedy, forKey: .kind)
+        case .randomMass(let mass):
+            try container.encode(Kind.randomMass, forKey: .kind)
+            try container.encode(mass, forKey: .value)
+        case .randomTopN(let n):
+            try container.encode(Kind.randomTopN, forKey: .kind)
+            try container.encode(n, forKey: .value)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(Kind.self, forKey: .kind)
+        switch kind {
+        case .greedy:
+            self = .greedy
+        case .randomMass:
+            let mass = try container.decode(Double.self, forKey: .value)
+            self = .randomMass(mass)
+        case .randomTopN:
+            let n = try container.decode(Int.self, forKey: .value)
+            self = .randomTopN(n)
+        }
+    }
+}
+
+/// Configuration for an Apple Intelligence on-device model instance.
+struct AppleIntelligenceConfig: Equatable, Sendable, Codable, Identifiable, Hashable {
+    let id: UUID
+    var name: String
+    var temperature: Double?           // nil = system default
+    var maximumResponseTokens: Int?    // nil = system default
+    var samplingMode: AISamplingMode
+
+    init(
+        id: UUID = UUID(),
+        name: String = "Apple Intelligence",
+        temperature: Double? = nil,
+        maximumResponseTokens: Int? = nil,
+        samplingMode: AISamplingMode = .greedy
+    ) {
+        self.id = id
+        self.name = name
+        self.temperature = temperature
+        self.maximumResponseTokens = maximumResponseTokens
+        self.samplingMode = samplingMode
+    }
+
+    /// Human-readable summary of the sampling configuration.
+    var samplingDescription: String {
+        switch samplingMode {
+        case .greedy:
+            return "Greedy"
+        case .randomMass(let mass):
+            return "Random (p=\(String(format: "%.2f", mass)))"
+        case .randomTopN(let n):
+            return "Random (top-\(n))"
+        }
+    }
+}
+
 // MARK: - Player Configuration
 
 struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
@@ -274,6 +357,7 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
     var isAI: Bool
     var aiConfigurationID: UUID?  // References ModelConfiguration.id from SwiftLLMKit
     var useAppleIntelligence: Bool
+    var appleIntelligenceConfigID: UUID?  // References AppleIntelligenceConfig.id
     var color: PieceColor
     var humanPlayerID: UUID?  // References HumanPlayer.id for human players
     var allowResign: Bool
@@ -283,6 +367,7 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
         isAI: Bool = false,
         aiConfigurationID: UUID? = nil,
         useAppleIntelligence: Bool = false,
+        appleIntelligenceConfigID: UUID? = nil,
         color: PieceColor = .white,
         humanPlayerID: UUID? = nil,
         allowResign: Bool = true,
@@ -293,6 +378,7 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
         self.isAI = isAI
         self.aiConfigurationID = aiConfigurationID
         self.useAppleIntelligence = useAppleIntelligence
+        self.appleIntelligenceConfigID = appleIntelligenceConfigID
         self.color = color
         self.humanPlayerID = humanPlayerID
         self.allowResign = allowResign
@@ -414,6 +500,35 @@ struct AIGuidedGenerationResult: Sendable, Equatable {
 
 /// Represents the user's choice of AI for a player slot.
 enum AISelection: Hashable, Sendable {
-    case appleIntelligence
+    case appleIntelligence(UUID)  // Carries an AppleIntelligenceConfig.id
     case llmConfig(UUID)
+
+    var isAppleIntelligence: Bool {
+        if case .appleIntelligence = self { return true }
+        return false
+    }
+
+    var appleIntelligenceConfigID: UUID? {
+        if case .appleIntelligence(let id) = self { return id }
+        return nil
+    }
+
+    var llmConfigID: UUID? {
+        if case .llmConfig(let id) = self { return id }
+        return nil
+    }
+}
+
+extension Optional where Wrapped == AISelection {
+    var isAppleIntelligence: Bool {
+        self?.isAppleIntelligence ?? false
+    }
+
+    var appleIntelligenceConfigID: UUID? {
+        self?.appleIntelligenceConfigID
+    }
+
+    var llmConfigID: UUID? {
+        self?.llmConfigID
+    }
 }

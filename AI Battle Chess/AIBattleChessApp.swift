@@ -9,6 +9,7 @@ struct AIBattleChessApp: App {
     )
     @State private var gameHistoryManager = GameHistoryManager()
     @State private var humanPlayerManager = HumanPlayerManager()
+    @State private var appleIntelligenceConfigManager = AppleIntelligenceConfigManager()
     @State private var engine: GameEngine?
 
     var body: some Scene {
@@ -25,7 +26,8 @@ struct AIBattleChessApp: App {
                 llmKit.load()
                 gameHistoryManager.loadAll()
                 humanPlayerManager.loadAll()
-                let gameEngine = GameEngine(llmKit: llmKit, gameHistoryManager: gameHistoryManager, humanPlayerManager: humanPlayerManager)
+                appleIntelligenceConfigManager.loadAll()
+                let gameEngine = GameEngine(llmKit: llmKit, gameHistoryManager: gameHistoryManager, humanPlayerManager: humanPlayerManager, appleIntelligenceConfigManager: appleIntelligenceConfigManager)
                 engine = gameEngine
 
                 // Refresh model catalog and auto-create configurations

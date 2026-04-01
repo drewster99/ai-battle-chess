@@ -68,16 +68,18 @@ final class GameEngine {
     let llmKit: LLMKitManager
     let gameHistoryManager: GameHistoryManager
     let humanPlayerManager: HumanPlayerManager
+    let appleIntelligenceConfigManager: AppleIntelligenceConfigManager
     private var aiTask: Task<Void, Never>? = nil
     private var animationTask: Task<Void, Never>? = nil
     private var gameFinalized: Bool = false
 
     // MARK: - Init
 
-    init(llmKit: LLMKitManager, gameHistoryManager: GameHistoryManager, humanPlayerManager: HumanPlayerManager) {
+    init(llmKit: LLMKitManager, gameHistoryManager: GameHistoryManager, humanPlayerManager: HumanPlayerManager, appleIntelligenceConfigManager: AppleIntelligenceConfigManager) {
         self.llmKit = llmKit
         self.gameHistoryManager = gameHistoryManager
         self.humanPlayerManager = humanPlayerManager
+        self.appleIntelligenceConfigManager = appleIntelligenceConfigManager
         self.aiService = AIService(llmKit: llmKit)
         if #available(macOS 26.0, *) {
             self.appleIntelligenceService = AppleIntelligenceService()
@@ -441,9 +443,15 @@ final class GameEngine {
                 let aiResult: (result: AIMoveResult, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?)
 
                 if player.useAppleIntelligence, let appleService = appleIntelligenceService {
+                    // Look up the specific config, or fall back to first available / sensible default
+                    let aiConfig: AppleIntelligenceConfig = player.appleIntelligenceConfigID
+                        .flatMap { self.appleIntelligenceConfigManager.config(byID: $0) }
+                        ?? self.appleIntelligenceConfigManager.configs.first
+                        ?? AppleIntelligenceConfig()
                     aiResult = try await appleService.requestMove(
                         board: boardSnapshot,
                         color: color,
+                        config: aiConfig,
                         gameID: gameID,
                         gameTurnIndex: gameTurnIndex,
                         positionRepetitionCount: repetitionCount,

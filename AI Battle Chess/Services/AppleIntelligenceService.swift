@@ -26,11 +26,30 @@ final class AppleIntelligenceService {
         SystemLanguageModel.default.isAvailable
     }
 
+    /// Builds `GenerationOptions` from an `AppleIntelligenceConfig`.
+    private func generationOptions(from config: AppleIntelligenceConfig) -> GenerationOptions {
+        let sampling: GenerationOptions.SamplingMode
+        switch config.samplingMode {
+        case .greedy:
+            sampling = .greedy
+        case .randomMass(let threshold):
+            sampling = .random(probabilityThreshold: threshold)
+        case .randomTopN(let k):
+            sampling = .random(top: k)
+        }
+        return GenerationOptions(
+            sampling: sampling,
+            temperature: config.temperature,
+            maximumResponseTokens: config.maximumResponseTokens
+        )
+    }
+
     /// Requests a chess move using Apple Intelligence on-device model with guided generation.
     /// Uses a single session so correction messages are part of the conversation history.
     func requestMove(
         board: ChessBoard,
         color: PieceColor,
+        config: AppleIntelligenceConfig,
         gameID: UUID,
         gameTurnIndex: Int,
         positionRepetitionCount: Int = 1,
@@ -51,7 +70,11 @@ final class AppleIntelligenceService {
         let systemPrompt = AIService.systemPrompt(for: color, isAppleIntelligence: true, board: board)
         let userPrompt = AIService.boardStatePrompt(board: board, positionRepetitionCount: positionRepetitionCount, positionCounts: positionCounts, allowResign: allowResign)
 
+        let options = generationOptions(from: config)
+        let configLabel = "\(config.name) [\(config.samplingDescription), temp=\(config.temperature.map { String(format: "%.2f", $0) } ?? "default"), maxTokens=\(config.maximumResponseTokens.map(String.init) ?? "default")]"
+
         print("[AppleIntelligence] ====== REQUEST ======")
+        print("[AppleIntelligence] Config: \(configLabel)")
         print("[AppleIntelligence] Color: \(color.displayName) | Turn: \(gameTurnIndex) | Game: \(gameID.uuidString.prefix(8))")
         print("[AppleIntelligence] --- SYSTEM PROMPT ---")
         print(systemPrompt)
@@ -92,7 +115,8 @@ final class AppleIntelligenceService {
 
                 let response = try await session.respond(
                     to: currentPrompt,
-                    generating: ChessMoveResponse.self
+                    generating: ChessMoveResponse.self,
+                    options: options
                 )
 
                 consecutiveErrors = 0
@@ -137,11 +161,11 @@ final class AppleIntelligenceService {
                     systemPrompt: systemPrompt,
                     userPrompt: userPrompt,
                     responseText: responseString,
-                    temperature: nil,
+                    temperature: config.temperature,
                     thinkingBudget: nil,
-                    maxOutputTokens: nil,
-                    modelName: "Apple Intelligence",
-                    providerName: "Apple",
+                    maxOutputTokens: config.maximumResponseTokens,
+                    modelName: config.name,
+                    providerName: "Apple Intelligence",
                     tokenUsage: nil,
                     guidedGenerationResult: guidedResult,
                     attempts: attempts
