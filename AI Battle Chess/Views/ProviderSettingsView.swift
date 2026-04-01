@@ -21,6 +21,7 @@ private struct ProviderTemplate: Identifiable {
 /// the resulting model configurations.
 struct ProviderSettingsView: View {
     let llmKit: LLMKitManager
+    let appleIntelligenceConfigManager: AppleIntelligenceConfigManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var apiKeys: [String: String] = [:]
@@ -36,6 +37,22 @@ struct ProviderSettingsView: View {
     @State private var editMaxOutputTokens: Int = 4096
     @State private var editMaxContextTokens: Int = 128_000
     @State private var editThinkingBudget: Int? = nil
+
+    // Apple Intelligence config editor state
+    @State private var editingAppleConfigID: UUID? = nil
+    @State private var editAppleName: String = ""
+    @State private var editAppleSamplingMode: AISamplingMode = .greedy
+    @State private var editAppleTemperatureEnabled: Bool = false
+    @State private var editAppleTemperature: Double = 1.0
+    @State private var editAppleMaxTokensEnabled: Bool = false
+    @State private var editAppleMaxTokens: Int = 4096
+
+    private var appleIntelligenceAvailable: Bool {
+        if #available(macOS 26.0, *) {
+            return AppleIntelligenceService.isAvailable
+        }
+        return false
+    }
 
     // Compile-time constant URLs -- force-unwrap is acceptable here.
     // swiftlint:disable force_unwrapping
@@ -117,6 +134,24 @@ struct ProviderSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Providers")
                 .font(.headline)
+
+            if appleIntelligenceAvailable {
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 8, height: 8)
+
+                    Text("Apple Intelligence")
+                        .font(.body)
+                        .frame(width: 120, alignment: .leading)
+
+                    Text("On-device  \u{2022}  Apple Foundation Models")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+                }
+            }
 
             ForEach(Self.templates) { template in
                 providerRow(template)
@@ -201,9 +236,14 @@ struct ProviderSettingsView: View {
             Text("Model Configurations")
                 .font(.headline)
 
+            // Apple Intelligence configurations
+            if appleIntelligenceAvailable {
+                appleIntelligenceConfigsSection
+            }
+
             let validConfigs = llmKit.configurations.filter(\.isValid)
 
-            if validConfigs.isEmpty {
+            if validConfigs.isEmpty && !appleIntelligenceAvailable {
                 Text("No configurations yet. Add a provider and click 'Discover Models'.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -446,4 +486,248 @@ struct ProviderSettingsView: View {
         }
     }
 
+    // MARK: - Apple Intelligence Configurations
+
+    private var appleIntelligenceConfigsSection: some View {
+        DisclosureGroup("Apple Intelligence") {
+            ForEach(appleIntelligenceConfigManager.configs) { config in
+                if editingAppleConfigID == config.id {
+                    appleConfigEditor(for: config)
+                } else {
+                    appleConfigRow(for: config)
+                }
+            }
+
+            Button {
+                let newConfig = appleIntelligenceConfigManager.addConfig(
+                    name: "Apple Intelligence (\(appleIntelligenceConfigManager.configs.count + 1))"
+                )
+                startEditingAppleConfig(newConfig)
+            } label: {
+                Label("New Configuration", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .padding(.top, 4)
+        }
+        .font(.subheadline)
+    }
+
+    private func appleConfigRow(for config: AppleIntelligenceConfig) -> some View {
+        HStack {
+            Text(config.name)
+                .font(.caption)
+            Spacer()
+            Text(config.samplingDescription)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let temp = config.temperature {
+                Text("temp: \(temp, specifier: "%.2f")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let tokens = config.maximumResponseTokens {
+                Text("max: \(tokens)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+        .contextMenu {
+            Button("Edit") {
+                startEditingAppleConfig(config)
+            }
+            Button("Duplicate & Edit") {
+                if let duplicate = appleIntelligenceConfigManager.duplicateConfig(id: config.id) {
+                    startEditingAppleConfig(duplicate)
+                }
+            }
+            Divider()
+            Button("Delete", role: .destructive) {
+                appleIntelligenceConfigManager.deleteConfig(id: config.id)
+            }
+            .disabled(appleIntelligenceConfigManager.configs.count <= 1)
+        }
+    }
+
+    private func startEditingAppleConfig(_ config: AppleIntelligenceConfig) {
+        editingAppleConfigID = config.id
+        editAppleName = config.name
+        editAppleSamplingMode = config.samplingMode
+        editAppleTemperatureEnabled = config.temperature != nil
+        editAppleTemperature = config.temperature ?? 1.0
+        editAppleMaxTokensEnabled = config.maximumResponseTokens != nil
+        editAppleMaxTokens = config.maximumResponseTokens ?? 4096
+    }
+
+    private func appleConfigEditor(for config: AppleIntelligenceConfig) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Name", text: $editAppleName)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+
+            HStack(spacing: 12) {
+                // Sampling mode
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sampling")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Picker("Sampling", selection: appleConfigSamplingTag) {
+                        Text("Greedy").tag(0)
+                        Text("Prob. mass").tag(1)
+                        Text("Top-N").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 220)
+                }
+
+                // Sampling parameter (mass or top-N)
+                switch editAppleSamplingMode {
+                case .randomMass(let mass):
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mass")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Slider(value: appleConfigMassBinding, in: 0.01...1.0, step: 0.01)
+                                .frame(width: 100)
+                            Text(String(format: "%.2f", mass))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 32)
+                        }
+                    }
+                case .randomTopN(let n):
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Top-N")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Slider(value: appleConfigTopNBinding, in: 1...200, step: 1)
+                                .frame(width: 100)
+                            Text("\(n)")
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 32)
+                        }
+                    }
+                case .greedy:
+                    EmptyView()
+                }
+            }
+
+            HStack(spacing: 12) {
+                // Temperature
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Temperature")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Toggle("", isOn: $editAppleTemperatureEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                        if editAppleTemperatureEnabled {
+                            Slider(value: $editAppleTemperature, in: 0.0...2.0, step: 0.05)
+                                .frame(width: 100)
+                            Text(String(format: "%.2f", editAppleTemperature))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 32)
+                        } else {
+                            Text("System default")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                // Max tokens
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Max Response Tokens")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Toggle("", isOn: $editAppleMaxTokensEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                        if editAppleMaxTokensEnabled {
+                            TextField("", value: $editAppleMaxTokens, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 80)
+                                .font(.caption)
+                        } else {
+                            Text("System default")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            HStack {
+                Button("Save") {
+                    var updated = config
+                    updated.name = editAppleName
+                    updated.samplingMode = editAppleSamplingMode
+                    updated.temperature = editAppleTemperatureEnabled ? editAppleTemperature : nil
+                    updated.maximumResponseTokens = editAppleMaxTokensEnabled ? editAppleMaxTokens : nil
+                    appleIntelligenceConfigManager.updateConfig(updated)
+                    editingAppleConfigID = nil
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+
+                Button("Cancel") {
+                    editingAppleConfigID = nil
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.accentColor.opacity(0.05))
+        )
+    }
+
+    // MARK: - Apple Intelligence Bindings
+
+    private var appleConfigSamplingTag: Binding<Int> {
+        Binding<Int>(
+            get: {
+                switch editAppleSamplingMode {
+                case .greedy: return 0
+                case .randomMass: return 1
+                case .randomTopN: return 2
+                }
+            },
+            set: { newTag in
+                switch newTag {
+                case 1: editAppleSamplingMode = .randomMass(0.9)
+                case 2: editAppleSamplingMode = .randomTopN(40)
+                default: editAppleSamplingMode = .greedy
+                }
+            }
+        )
+    }
+
+    private var appleConfigMassBinding: Binding<Double> {
+        Binding<Double>(
+            get: {
+                if case .randomMass(let mass) = editAppleSamplingMode { return mass }
+                return 0.9
+            },
+            set: { editAppleSamplingMode = .randomMass($0) }
+        )
+    }
+
+    private var appleConfigTopNBinding: Binding<Double> {
+        Binding<Double>(
+            get: {
+                if case .randomTopN(let n) = editAppleSamplingMode { return Double(n) }
+                return 40
+            },
+            set: { editAppleSamplingMode = .randomTopN(Int($0)) }
+        )
+    }
 }

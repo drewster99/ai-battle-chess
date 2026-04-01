@@ -106,11 +106,15 @@ struct GameSetupView: View {
         }
         .padding(32)
         .frame(maxWidth: 800)
+        .onAppear {
+            restoreLastSetup()
+        }
         .sheet(isPresented: $showLoadPGN) {
             loadPGNSheet
         }
         .sheet(isPresented: $showProviderSettings) {
-            ProviderSettingsView(llmKit: engine.llmKit)
+            ProviderSettingsView(llmKit: engine.llmKit,
+                                appleIntelligenceConfigManager: engine.appleIntelligenceConfigManager)
         }
         .alert("New Player", isPresented: $showAddPlayer) {
             TextField("Name", text: $newPlayerName)
@@ -129,9 +133,6 @@ struct GameSetupView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Enter a name for the new player.")
-        }
-        .onAppear {
-            restoreLastSetup()
         }
     }
 
@@ -283,258 +284,12 @@ struct GameSetupView: View {
             }
             .labelsHidden()
 
-            // Inline Apple Intelligence config controls
-            if let selectedAIConfig = selectedAppleIntelligenceConfig(for: selection.wrappedValue) {
-                appleIntelligenceConfigControls(configID: selectedAIConfig.id)
-            }
-
-            if appleIntelligenceAvailable {
-                HStack(spacing: 8) {
-                    Button {
-                        let newConfig = engine.appleIntelligenceConfigManager.addConfig(
-                            name: "Apple Intelligence (\(engine.appleIntelligenceConfigManager.configs.count + 1))"
-                        )
-                        selection.wrappedValue = .appleIntelligence(newConfig.id)
-                    } label: {
-                        Label("New Config", systemImage: "plus")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-
-                    if let selected = selectedAppleIntelligenceConfig(for: selection.wrappedValue),
-                       engine.appleIntelligenceConfigManager.configs.count > 1 {
-                        Button(role: .destructive) {
-                            engine.appleIntelligenceConfigManager.deleteConfig(id: selected.id)
-                            // Select the first remaining config
-                            if let first = engine.appleIntelligenceConfigManager.configs.first {
-                                selection.wrappedValue = .appleIntelligence(first.id)
-                            } else {
-                                selection.wrappedValue = nil
-                            }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                }
-            }
-
             if configurations.isEmpty && !appleIntelligenceAvailable {
                 Text("No AI configurations available.\nClick 'Configure AI Providers' to add providers.")
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
         }
-    }
-
-    /// Returns the Apple Intelligence config if the current selection is an Apple Intelligence config.
-    private func selectedAppleIntelligenceConfig(for selection: AISelection?) -> AppleIntelligenceConfig? {
-        guard case .appleIntelligence(let configID) = selection else { return nil }
-        return engine.appleIntelligenceConfigManager.config(byID: configID)
-    }
-
-    /// Inline controls for editing an Apple Intelligence configuration.
-    private func appleIntelligenceConfigControls(configID: UUID) -> some View {
-        let manager = engine.appleIntelligenceConfigManager
-
-        // Bind directly to the manager's config
-        let nameBinding = Binding<String>(
-            get: { manager.config(byID: configID)?.name ?? "" },
-            set: { newValue in
-                guard var config = manager.config(byID: configID) else { return }
-                config.name = newValue
-                manager.updateConfig(config)
-            }
-        )
-
-        let samplingModeTag = Binding<Int>(
-            get: {
-                guard let config = manager.config(byID: configID) else { return 0 }
-                switch config.samplingMode {
-                case .greedy: return 0
-                case .randomMass: return 1
-                case .randomTopN: return 2
-                }
-            },
-            set: { newTag in
-                guard var config = manager.config(byID: configID) else { return }
-                switch newTag {
-                case 0: config.samplingMode = .greedy
-                case 1: config.samplingMode = .randomMass(0.9)
-                case 2: config.samplingMode = .randomTopN(40)
-                default: break
-                }
-                manager.updateConfig(config)
-            }
-        )
-
-        let temperatureEnabled = Binding<Bool>(
-            get: { manager.config(byID: configID)?.temperature != nil },
-            set: { enabled in
-                guard var config = manager.config(byID: configID) else { return }
-                config.temperature = enabled ? 1.0 : nil
-                manager.updateConfig(config)
-            }
-        )
-
-        let temperature = Binding<Double>(
-            get: { manager.config(byID: configID)?.temperature ?? 1.0 },
-            set: { newValue in
-                guard var config = manager.config(byID: configID) else { return }
-                config.temperature = newValue
-                manager.updateConfig(config)
-            }
-        )
-
-        let maxTokensEnabled = Binding<Bool>(
-            get: { manager.config(byID: configID)?.maximumResponseTokens != nil },
-            set: { enabled in
-                guard var config = manager.config(byID: configID) else { return }
-                config.maximumResponseTokens = enabled ? 4096 : nil
-                manager.updateConfig(config)
-            }
-        )
-
-        let maxTokens = Binding<Double>(
-            get: { Double(manager.config(byID: configID)?.maximumResponseTokens ?? 4096) },
-            set: { newValue in
-                guard var config = manager.config(byID: configID) else { return }
-                config.maximumResponseTokens = Int(newValue)
-                manager.updateConfig(config)
-            }
-        )
-
-        let probabilityMass = Binding<Double>(
-            get: {
-                guard let config = manager.config(byID: configID),
-                      case .randomMass(let mass) = config.samplingMode else { return 0.9 }
-                return mass
-            },
-            set: { newValue in
-                guard var config = manager.config(byID: configID) else { return }
-                config.samplingMode = .randomMass(newValue)
-                manager.updateConfig(config)
-            }
-        )
-
-        let topN = Binding<Double>(
-            get: {
-                guard let config = manager.config(byID: configID),
-                      case .randomTopN(let n) = config.samplingMode else { return 40 }
-                return Double(n)
-            },
-            set: { newValue in
-                guard var config = manager.config(byID: configID) else { return }
-                config.samplingMode = .randomTopN(Int(newValue))
-                manager.updateConfig(config)
-            }
-        )
-
-        return VStack(alignment: .leading, spacing: 6) {
-            Divider()
-
-            // Config name
-            HStack {
-                Text("Name")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 60, alignment: .trailing)
-                TextField("Config Name", text: nameBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
-            }
-
-            // Sampling mode
-            HStack {
-                Text("Sampling")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 60, alignment: .trailing)
-                Picker("Sampling", selection: samplingModeTag) {
-                    Text("Greedy").tag(0)
-                    Text("Random (probability)").tag(1)
-                    Text("Random (top-N)").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-
-            // Probability mass slider (only for randomMass mode)
-            if case .randomMass = manager.config(byID: configID)?.samplingMode ?? .greedy {
-                HStack {
-                    Text("Mass")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 60, alignment: .trailing)
-                    Slider(value: probabilityMass, in: 0.01...1.0, step: 0.01)
-                    Text(String(format: "%.2f", probabilityMass.wrappedValue))
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 35, alignment: .trailing)
-                }
-            }
-
-            // Top-N stepper (only for randomTopN mode)
-            if case .randomTopN = manager.config(byID: configID)?.samplingMode ?? .greedy {
-                HStack {
-                    Text("Top-N")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 60, alignment: .trailing)
-                    Slider(value: topN, in: 1...200, step: 1)
-                    Text("\(Int(topN.wrappedValue))")
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 35, alignment: .trailing)
-                }
-            }
-
-            // Temperature
-            HStack {
-                Text("Temp")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 60, alignment: .trailing)
-                Toggle("", isOn: temperatureEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                if temperatureEnabled.wrappedValue {
-                    Slider(value: temperature, in: 0.0...2.0, step: 0.05)
-                    Text(String(format: "%.2f", temperature.wrappedValue))
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 35, alignment: .trailing)
-                } else {
-                    Text("System default")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            // Max response tokens
-            HStack {
-                Text("Tokens")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 60, alignment: .trailing)
-                Toggle("", isOn: maxTokensEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                if maxTokensEnabled.wrappedValue {
-                    Slider(value: maxTokens, in: 256...16384, step: 256)
-                    Text("\(Int(maxTokens.wrappedValue))")
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 50, alignment: .trailing)
-                } else {
-                    Text("System default")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Divider()
-        }
-        .padding(.top, 4)
     }
 
     // MARK: - Load PGN

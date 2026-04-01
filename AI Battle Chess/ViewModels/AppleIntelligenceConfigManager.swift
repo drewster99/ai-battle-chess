@@ -16,7 +16,17 @@ final class AppleIntelligenceConfigManager {
     // MARK: - Properties
 
     /// All Apple Intelligence configurations, sorted alphabetically by name.
-    private(set) var configs: [AppleIntelligenceConfig] = []
+    private(set) var configs: [AppleIntelligenceConfig] = [] {
+        didSet { rebuildIndex() }
+    }
+
+    /// O(1) lookup index keyed by config ID. Derived from `configs`; excluded from observation.
+    @ObservationIgnored
+    private var configsByID: [UUID: AppleIntelligenceConfig] = [:]
+
+    private func rebuildIndex() {
+        configsByID = Dictionary(uniqueKeysWithValues: configs.map { ($0.id, $0) })
+    }
 
     // MARK: - Storage
 
@@ -47,39 +57,46 @@ final class AppleIntelligenceConfigManager {
 
     /// Loads configurations from disk, creating a default if none exist.
     func loadAll() {
-        let fileManager = FileManager.default
+        let url = fileURL
+        let decoder = self.decoder
 
-        if fileManager.fileExists(atPath: fileURL.path) {
+        let loaded: [AppleIntelligenceConfig]? = {
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
             do {
-                let data = try Data(contentsOf: fileURL)
-                let loaded = try decoder.decode([AppleIntelligenceConfig].self, from: data)
-                configs = loaded.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
-                if configs.isEmpty {
-                    configs = [Self.makeDefault()]
-                    save()
-                }
+                let data = try Data(contentsOf: url)
+                let decoded = try decoder.decode([AppleIntelligenceConfig].self, from: data)
+                return decoded.isEmpty ? nil : decoded
             } catch {
                 print("[AIConfigManager] Failed to load configs: \(error)")
-                configs = [Self.makeDefault()]
-                save()
+                return nil
             }
+        }()
+
+        if let loaded {
+            configs = loaded.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
         } else {
             configs = [Self.makeDefault()]
-            save()
+            persistToDisk()
         }
     }
 
     // MARK: - Persistence
 
-    /// Writes the current config list to disk.
-    private func save() {
-        let directory = fileURL.deletingLastPathComponent()
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let data = try encoder.encode(configs)
-            try data.write(to: fileURL, options: .atomic)
-        } catch {
-            print("[AIConfigManager] Failed to save configs: \(error)")
+    /// Schedules a background write of the current config list to disk.
+    private func persistToDisk() {
+        let url = fileURL
+        let encoder = self.encoder
+        let snapshot = configs
+
+        Task.detached(priority: .utility) {
+            let directory = url.deletingLastPathComponent()
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let data = try encoder.encode(snapshot)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                print("[AIConfigManager] Failed to save configs: \(error)")
+            }
         }
     }
 
@@ -101,7 +118,7 @@ final class AppleIntelligenceConfigManager {
         )
         configs.append(config)
         configs.sort(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
-        save()
+        persistToDisk()
         return config
     }
 
@@ -117,7 +134,7 @@ final class AppleIntelligenceConfigManager {
         )
         configs.append(copy)
         configs.sort(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
-        save()
+        persistToDisk()
         return copy
     }
 
@@ -126,19 +143,19 @@ final class AppleIntelligenceConfigManager {
         guard let index = configs.firstIndex(where: { $0.id == updated.id }) else { return }
         configs[index] = updated
         configs.sort(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
-        save()
+        persistToDisk()
     }
 
     /// Deletes a configuration. Refuses to delete the last remaining config.
     func deleteConfig(id: UUID) {
         guard configs.count > 1 else { return }
         configs.removeAll(where: { $0.id == id })
-        save()
+        persistToDisk()
     }
 
-    /// Returns the config with the given ID, or nil if not found.
+    /// Returns the config with the given ID, or nil if not found. O(1) via dictionary index.
     func config(byID id: UUID) -> AppleIntelligenceConfig? {
-        configs.first(where: { $0.id == id })
+        configsByID[id]
     }
 
     // MARK: - Defaults
@@ -146,7 +163,7 @@ final class AppleIntelligenceConfigManager {
     /// Creates the default Apple Intelligence configuration.
     private static func makeDefault() -> AppleIntelligenceConfig {
         AppleIntelligenceConfig(
-            name: "Apple Intelligence (Default)",
+            name: "Apple Intelligence",
             temperature: nil,
             maximumResponseTokens: nil,
             samplingMode: .greedy

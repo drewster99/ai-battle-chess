@@ -444,10 +444,11 @@ final class GameEngine {
 
                 if player.useAppleIntelligence, let appleService = appleIntelligenceService {
                     // Look up the specific config, or fall back to first available / sensible default
-                    let aiConfig: AppleIntelligenceConfig = player.appleIntelligenceConfigID
-                        .flatMap { self.appleIntelligenceConfigManager.config(byID: $0) }
-                        ?? self.appleIntelligenceConfigManager.configs.first
-                        ?? AppleIntelligenceConfig()
+                    guard let aiConfig: AppleIntelligenceConfig = player.appleIntelligenceConfigID
+                        .flatMap({ self.appleIntelligenceConfigManager.config(byID: $0) })
+                        ?? self.appleIntelligenceConfigManager.configs.first else {
+                        throw AIError.noConfigurationSelected
+                    }
                     aiResult = try await appleService.requestMove(
                         board: boardSnapshot,
                         color: color,
