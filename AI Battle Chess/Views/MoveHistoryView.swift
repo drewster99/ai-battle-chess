@@ -238,6 +238,16 @@ struct MoveHistoryView: View {
             }
             .buttonStyle(.borderless)
 
+            Button {
+                let fen = engine.currentFEN
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(fen, forType: .string)
+            } label: {
+                Label("Copy FEN", systemImage: "square.grid.3x3")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+
             Spacer()
         }
     }

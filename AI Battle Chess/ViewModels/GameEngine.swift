@@ -982,8 +982,49 @@ final class GameEngine {
             result: gameResult,
             whiteName: whitePlayer.name,
             blackName: blackPlayer.name,
+            whiteDescription: playerModelDescription(whitePlayer),
+            blackDescription: playerModelDescription(blackPlayer),
             gameID: currentGameID
         )
+    }
+
+    /// Returns a human-readable description of the AI model and parameters for PGN headers.
+    private func playerModelDescription(_ player: PlayerConfig) -> String? {
+        guard player.isAI else { return nil }
+
+        if player.useAppleIntelligence {
+            guard let configID = player.appleIntelligenceConfigID,
+                  let config = appleIntelligenceConfigManager.config(byID: configID) else {
+                return "Apple Intelligence"
+            }
+            var parts = ["Apple Intelligence"]
+            parts.append(config.samplingDescription)
+            if let temp = config.temperature {
+                parts.append("temp=\(String(format: "%.2f", temp))")
+            }
+            if let tokens = config.maximumResponseTokens {
+                parts.append("maxTokens=\(tokens)")
+            }
+            return parts.joined(separator: ", ")
+        }
+
+        guard let configID = player.aiConfigurationID,
+              let config = llmKit.configurations.first(where: { $0.id == configID }) else {
+            return nil
+        }
+        let providerName = llmKit.providers.first(where: { $0.id == config.providerID })?.name ?? config.providerID
+        var parts = ["\(providerName)/\(config.modelID)"]
+        parts.append("temp=\(String(format: "%.1f", config.temperature))")
+        parts.append("maxTokens=\(config.maxOutputTokens)")
+        if let budget = config.thinkingBudget, budget > 0 {
+            parts.append("thinking=\(budget)")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    /// FEN string for the currently displayed board position.
+    var currentFEN: String {
+        displayBoard.fen
     }
 
     // MARK: - System Info

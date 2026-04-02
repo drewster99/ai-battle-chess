@@ -53,6 +53,8 @@ struct PGNFormatter {
         result: GameResult?,
         whiteName: String = "White",
         blackName: String = "Black",
+        whiteDescription: String? = nil,
+        blackDescription: String? = nil,
         event: String = "AI Battle Chess",
         date: Date = Date(),
         gameID: UUID? = nil
@@ -71,12 +73,21 @@ struct PGNFormatter {
         pgn += "[Black \"\(escapePGNString(blackName))\"]\n"
         pgn += "[Result \"\(result?.pgnResult ?? "*")\"]\n"
 
+        // AI model detail headers
+        if let desc = whiteDescription {
+            pgn += "[WhiteModel \"\(escapePGNString(desc))\"]\n"
+        }
+        if let desc = blackDescription {
+            pgn += "[BlackModel \"\(escapePGNString(desc))\"]\n"
+        }
+
         // Extended headers
         if let gameID {
             pgn += "[GameID \"\(gameID.uuidString)\"]\n"
         }
-        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
-        pgn += "[AppVersion \"\(appVersion)\"]\n"
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        pgn += "[AppVersion \"\(version)(\(build))\"]\n"
         pgn += "[Platform \"\(ProcessInfo.processInfo.operatingSystemVersionString)\"]\n"
         let ramGB = ProcessInfo.processInfo.physicalMemory / (1024 * 1024 * 1024)
         pgn += "[System \"\(ramGB)GB RAM\"]\n"

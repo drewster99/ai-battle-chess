@@ -88,6 +88,67 @@ struct ChessBoard: Equatable, Sendable {
         )
     }
 
+    // MARK: - FEN
+
+    /// Returns the board state as a FEN (Forsyth-Edwards Notation) string.
+    var fen: String {
+        // 1. Piece placement (rank 8 down to rank 1)
+        var placement = ""
+        for rank in stride(from: 7, through: 0, by: -1) {
+            var emptyCount = 0
+            for file in 0..<8 {
+                if let piece = squares[file][rank] {
+                    if emptyCount > 0 {
+                        placement += "\(emptyCount)"
+                        emptyCount = 0
+                    }
+                    let letter: String
+                    switch piece.type {
+                    case .pawn:   letter = "p"
+                    case .knight: letter = "n"
+                    case .bishop: letter = "b"
+                    case .rook:   letter = "r"
+                    case .queen:  letter = "q"
+                    case .king:   letter = "k"
+                    }
+                    placement += piece.color == .white ? letter.uppercased() : letter
+                } else {
+                    emptyCount += 1
+                }
+            }
+            if emptyCount > 0 {
+                placement += "\(emptyCount)"
+            }
+            if rank > 0 {
+                placement += "/"
+            }
+        }
+
+        // 2. Active color
+        let active = activeColor == .white ? "w" : "b"
+
+        // 3. Castling availability
+        var castling = ""
+        if whiteCanCastleKingside  { castling += "K" }
+        if whiteCanCastleQueenside { castling += "Q" }
+        if blackCanCastleKingside  { castling += "k" }
+        if blackCanCastleQueenside { castling += "q" }
+        if castling.isEmpty { castling = "-" }
+
+        // 4. En passant target square
+        let ep: String
+        if let target = enPassantTarget {
+            // target.file is 0-7, so 97+file (a=97..h=104) is always a valid ASCII scalar.
+            let fileLetter = Character(UnicodeScalar(UInt8(97 + target.file)))
+            ep = "\(fileLetter)\(target.rank + 1)"
+        } else {
+            ep = "-"
+        }
+
+        // 5. Halfmove clock, 6. Fullmove number
+        return "\(placement) \(active) \(castling) \(ep) \(halfMoveClock) \(fullMoveNumber)"
+    }
+
     // MARK: - Initialization
 
     init() {
