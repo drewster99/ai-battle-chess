@@ -214,6 +214,29 @@ struct PlayerPanelView: View {
             Label("\(moves)", systemImage: "arrow.right")
                 .instantHelp("Moves played this game")
 
+            // Current move elapsed time (live) or viewed move duration (history)
+            if let viewIndex = engine.viewingMoveIndex {
+                // Viewing history — show the duration of the viewed move if it belongs to this player
+                if viewIndex < engine.moveHistory.count,
+                   engine.moveHistory[viewIndex].piece.color == color {
+                    let durations = engine.statistics.perMoveDuration[color] ?? []
+                    let moveNumber = engine.moveHistory.prefix(viewIndex + 1).filter({ $0.piece.color == color }).count
+                    if moveNumber > 0, moveNumber <= durations.count {
+                        let duration = durations[moveNumber - 1]
+                        Label(formatDuration(duration), systemImage: "stopwatch")
+                            .foregroundStyle(.primary)
+                            .instantHelp("Time taken for this move")
+                    }
+                }
+            } else if engine.isGameActive, !engine.isViewingPastGame,
+                      engine.board.activeColor == color {
+                // Live game, this player's turn — show live timer
+                Text(engine.statistics.turnStartTime, style: .timer)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.primary)
+                    .instantHelp("Time elapsed on current move")
+            }
+
             if totalTime > 0 {
                 Label(formatDuration(totalTime), systemImage: "timer")
                     .instantHelp("Total time for all moves this game")
