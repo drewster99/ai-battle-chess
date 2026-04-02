@@ -144,6 +144,7 @@ struct ContentView: View {
             titleVisibility: .visible
         ) {
             Button("Abandon Game", role: .destructive) {
+                engine.stopGame()
                 showSetup = true
             }
             Button("Cancel", role: .cancel) {}

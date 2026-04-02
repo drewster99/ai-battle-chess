@@ -7,7 +7,7 @@ import FoundationModels
 @available(macOS 26.0, *)
 @Generable
 struct ChessMoveResponse {
-    @Guide(description: "Your step-by-step reasoning about the position and possible moves")
+    @Guide(description: "Your step-by-step reasoning about the position and possible moves. Remember this is a game, so talk of capturing and protecting pieces and winning, never killing them.")
     var thinkingLogic: String
 
     @Guide(description: "The chosen chess move in coordinate notation, e.g. e2e4, g1f3, e7e8q. Must match a move from the given list of valid moves")
@@ -21,9 +21,21 @@ struct ChessMoveResponse {
 @MainActor
 final class AppleIntelligenceService {
 
+    /// Maximum retries specifically for guardrail violations before giving up.
+    private static let maxGuardrailRetries = 3
+
     /// Checks if Apple Intelligence / Foundation Models are available on this device.
     static var isAvailable: Bool {
         SystemLanguageModel.default.isAvailable
+    }
+
+    /// Returns true if the error is a FoundationModels guardrail violation.
+    private func isGuardrailViolation(_ error: Error) -> Bool {
+        if let genError = error as? LanguageModelSession.GenerationError,
+           case .guardrailViolation = genError {
+            return true
+        }
+        return false
     }
 
     /// Builds `GenerationOptions` from an `AppleIntelligenceConfig`.
@@ -54,7 +66,8 @@ final class AppleIntelligenceService {
         gameTurnIndex: Int,
         positionRepetitionCount: Int = 1,
         positionCounts: [ChessBoard.PositionKey: Int] = [:],
-        allowResign: Bool = true
+        allowResign: Bool = true,
+        onError: ((String) -> Void)? = nil
     ) async throws -> (result: AIMoveResult, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
         guard AppleIntelligenceService.isAvailable else {
             print("[AppleIntelligence] ERROR: Apple Intelligence is not available on this device")
@@ -82,18 +95,23 @@ final class AppleIntelligenceService {
         print(userPrompt)
         print("[AppleIntelligence] --- END PROMPTS ---")
 
+        // Use permissive guardrails since chess naturally involves words like
+        // "attack", "capture", "sacrifice" that can trigger safety filters.
+        let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)
+
         // Session for conversation — corrections accumulate in history.
         // Recreated every N turns or on actual errors to avoid context overflow.
-        var session = LanguageModelSession(instructions: systemPrompt)
+        var session = LanguageModelSession(model: model, instructions: systemPrompt)
         var currentPrompt = userPrompt
         var turnsSinceReset = 0
+        var guardrailViolationCount = 0
 
         for attempt in 0..<AIService.maxRetries {
             do {
                 // Reset conversation if we've accumulated too many correction turns
                 if turnsSinceReset >= AIConstants.conversationResetInterval {
                     print("[AppleIntelligence] Resetting session (hit \(AIConstants.conversationResetInterval)-turn limit)")
-                    session = LanguageModelSession(instructions: systemPrompt)
+                    session = LanguageModelSession(model: model, instructions: systemPrompt)
                     currentPrompt = userPrompt
                     turnsSinceReset = 0
                 }
@@ -265,6 +283,47 @@ final class AppleIntelligenceService {
             } catch {
                 print("[AppleIntelligence] ERROR attempt \(attempt + 1): \(type(of: error)) — \(error.localizedDescription)")
 
+                onError?("\(error.localizedDescription) (attempt \(attempt + 1)/\(AIService.maxRetries))")
+
+                // Detect safety guardrail violations — fail fast instead of retrying 100 times
+                if isGuardrailViolation(error) {
+                    guardrailViolationCount += 1
+                    penalties.append(AIPenalty(
+                        reason: "Safety guardrail triggered (attempt \(attempt + 1), violation \(guardrailViolationCount)/\(Self.maxGuardrailRetries))",
+                        severity: .critical,
+                        timestamp: Date()
+                    ))
+                    retries += 1
+
+                    if guardrailViolationCount >= Self.maxGuardrailRetries {
+                        print("[AppleIntelligence] GUARDRAIL: Safety filter triggered \(guardrailViolationCount) times — giving up")
+                        print("[AppleIntelligence] ====== END REQUEST (GUARDRAIL) ======")
+                        throw AIServiceFailure(
+                            underlyingError: AIError.safetyGuardrail,
+                            penalties: penalties,
+                            retries: retries,
+                            lastActivityLog: lastActivityLog
+                        )
+                    }
+
+                    // Brief pause then retry with fresh session
+                    print("[AppleIntelligence] GUARDRAIL: Retrying with fresh session (\(guardrailViolationCount)/\(Self.maxGuardrailRetries))...")
+                    do {
+                        try await Task.sleep(for: .seconds(1))
+                    } catch {
+                        throw AIServiceFailure(
+                            underlyingError: CancellationError(),
+                            penalties: penalties,
+                            retries: retries,
+                            lastActivityLog: lastActivityLog
+                        )
+                    }
+                    session = LanguageModelSession(model: model, instructions: systemPrompt)
+                    currentPrompt = userPrompt
+                    turnsSinceReset = 0
+                    continue
+                }
+
                 penalties.append(AIPenalty(
                     reason: "Error: \(error.localizedDescription) (attempt \(attempt + 1))",
                     severity: attempt >= AIService.maxRetries - 1 ? .critical : .major,
@@ -306,7 +365,7 @@ final class AppleIntelligenceService {
                 }
 
                 // On error, reset to a fresh session for next attempt
-                session = LanguageModelSession(instructions: systemPrompt)
+                session = LanguageModelSession(model: model, instructions: systemPrompt)
                 currentPrompt = userPrompt
                 turnsSinceReset = 0
             }

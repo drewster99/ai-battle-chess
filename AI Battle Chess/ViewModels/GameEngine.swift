@@ -162,7 +162,20 @@ final class GameEngine {
         return statusMessage
     }
 
-    // MARK: - New Game
+    // MARK: - Game Lifecycle
+
+    /// Stops the current game, cancelling any in-flight AI tasks.
+    /// Does NOT reset state — call `startNewGame()` to begin a fresh game.
+    func stopGame() {
+        aiTask?.cancel()
+        aiTask = nil
+        animationTask?.cancel()
+        animationTask = nil
+        isAIThinking = false
+        currentAIColor = nil
+        isGameActive = false
+        finalizeCurrentGame()
+    }
 
     func startNewGame() {
         // If viewing a past game, restore live state before finalizing
@@ -457,7 +470,10 @@ final class GameEngine {
                         gameTurnIndex: gameTurnIndex,
                         positionRepetitionCount: repetitionCount,
                         positionCounts: posCountsSnapshot,
-                        allowResign: player.allowResign
+                        allowResign: player.allowResign,
+                        onError: { [weak self] message in
+                            self?.errorMessage = message
+                        }
                     )
                 } else if let configID = player.aiConfigurationID {
                     aiResult = try await aiService.requestMove(
@@ -468,13 +484,19 @@ final class GameEngine {
                         gameTurnIndex: gameTurnIndex,
                         positionRepetitionCount: repetitionCount,
                         positionCounts: posCountsSnapshot,
-                        allowResign: player.allowResign
+                        allowResign: player.allowResign,
+                        onError: { [weak self] message in
+                            self?.errorMessage = message
+                        }
                     )
                 } else {
                     throw AIError.noConfigurationSelected
                 }
 
                 guard !Task.isCancelled, gameID == self.currentGameID else { return }
+
+                // Clear any retry error now that the AI succeeded
+                errorMessage = nil
 
                 // Record penalties
                 for penalty in aiResult.penalties {
@@ -528,7 +550,24 @@ final class GameEngine {
                     }
                 }
 
-                if let aiError = actualError as? AIError, case .tooManyRetries = aiError {
+                if let aiError = actualError as? AIError, case .safetyGuardrail = aiError {
+                    // Safety guardrail — pick a random legal move so the game continues
+                    let legalMoves = MoveValidator.allLegalMoves(for: boardSnapshot)
+                    if let randomMove = legalMoves.randomElement() {
+                        let penalty = AIPenalty(
+                            reason: "Safety guardrail triggered — forced random move \(randomMove.from)\(randomMove.to)",
+                            severity: .critical,
+                            timestamp: Date()
+                        )
+                        statistics.aiPenalties[color, default: []].append(penalty)
+                        statusMessage = "Safety filter triggered — \(color.displayName) plays random move"
+                        applyMove(randomMove)
+                    } else {
+                        // No legal moves — shouldn't happen (would be checkmate/stalemate already)
+                        errorMessage = "Safety filter triggered and no legal moves available"
+                        statusMessage = "AI error - \(color.displayName) turn"
+                    }
+                } else if let aiError = actualError as? AIError, case .tooManyRetries = aiError {
                     // AI forfeits — all retry details are already recorded above
                     let penalty = AIPenalty(
                         reason: "AI forfeited after \(AIService.maxRetries) failed attempts",

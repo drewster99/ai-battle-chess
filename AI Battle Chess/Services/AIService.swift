@@ -362,7 +362,8 @@ final class AIService {
         gameTurnIndex: Int,
         positionRepetitionCount: Int = 1,
         positionCounts: [ChessBoard.PositionKey: Int] = [:],
-        allowResign: Bool = true
+        allowResign: Bool = true,
+        onError: ((String) -> Void)? = nil
     ) async throws -> (result: AIMoveResult, penalties: [AIPenalty], retries: Int, activityLog: AIActivityLog?) {
         var penalties: [AIPenalty] = []
         var retries = 0
@@ -592,6 +593,8 @@ final class AIService {
             } catch {
                 let label = error is AIError ? "AI error" : "Network error"
                 print("[AIService] ERROR attempt \(attempt + 1): \(label) — \(error.localizedDescription)")
+
+                onError?("\(label): \(error.localizedDescription) (attempt \(attempt + 1)/\(AIService.maxRetries))")
 
                 let penalty = AIPenalty(
                     reason: "\(label): \(error.localizedDescription) (attempt \(attempt + 1))",
@@ -961,6 +964,7 @@ enum AIError: Error, LocalizedError {
     case tooManyRetries
     case noConfigurationSelected
     case appleIntelligenceUnavailable
+    case safetyGuardrail
 
     var errorDescription: String? {
         switch self {
@@ -969,6 +973,7 @@ enum AIError: Error, LocalizedError {
         case .tooManyRetries: return "AI failed after \(AIConstants.maxRetries) attempts"
         case .noConfigurationSelected: return "No AI model configuration selected"
         case .appleIntelligenceUnavailable: return "Apple Intelligence is not available"
+        case .safetyGuardrail: return "Apple Intelligence safety filter blocked this position"
         }
     }
 }
