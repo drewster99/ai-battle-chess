@@ -8,6 +8,9 @@ Allow pasting a FEN string to create a new game starting from that board state. 
 ### Fix Move Animation Interruption
 When the next move arrives before the current piece animation finishes, the animated piece snaps back to its source square before jumping to the final position. The animation cancellation logic (`animationTask?.cancel()` with `disablesAnimations` transaction) should instantly commit the in-flight piece to its destination before starting the new animation.
 
+### Resume Game on Relaunch
+If the app crashes, is closed, or is otherwise terminated during an active game, there is currently no way to resume that game on next launch. Since we already save move-by-move board state, this should be straightforward — persist the active game's state (player configs, move history, board states) and offer to resume on next launch.
+
 ### Copy PGN/FEN Should Match Displayed State
 Copy FEN already respects the currently displayed position (via `displayBoard`). However, Copy PGN always exports the live game's full move history — it does not reflect mid-game navigation (`viewingMoveIndex`) or past game viewing (`viewingGameIndex`). PGN export should truncate moves to the viewed position when navigating history, and export the past game's data when viewing a past game.
 
