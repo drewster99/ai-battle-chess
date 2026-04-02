@@ -434,7 +434,7 @@ final class AIService {
 
                 print("[AIService] Attempt \(attempt + 1)/\(AIService.maxRetries) — sending request...")
 
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await llmURLSession.data(for: request)
 
                 AILogger.logResponse(
                     gameID: gameID,
