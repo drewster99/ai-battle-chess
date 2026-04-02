@@ -337,9 +337,9 @@ struct ContentView: View {
 
             Spacer()
 
-            // Session stats
+            // Total games played
             let totalGames = engine.gameHistoryManager.totalGamesPlayed + (engine.isGameActive ? 1 : 0)
-            Text("Session: \(totalGames) games")
+            Text("\(totalGames) games played")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .fixedSize()
