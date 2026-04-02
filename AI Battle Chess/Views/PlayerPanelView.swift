@@ -296,14 +296,29 @@ struct PlayerPanelView: View {
                 HStack(spacing: 2) {
                     ForEach(Array(captured.enumerated()), id: \.offset) { _, type in
                         let piece = ChessPiece(color: color.opposite, type: type)
-                        Image(piece.assetName)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 18, height: 18)
-                            .opacity(0.7)
+                        capturedPieceImage(piece)
                     }
                 }
             }
+        }
+    }
+
+    /// Renders a captured piece image with a contrast outline for visibility in both light and dark mode.
+    @ViewBuilder
+    private func capturedPieceImage(_ piece: ChessPiece) -> some View {
+        let image = Image(piece.assetName)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 18, height: 18)
+
+        if piece.color == .black {
+            // Black pieces need a light outline to be visible on dark backgrounds
+            image
+                .shadow(color: .white.opacity(0.9), radius: 0.5)
+                .opacity(0.85)
+        } else {
+            image
+                .opacity(0.7)
         }
     }
 
