@@ -97,6 +97,10 @@ final class GameEngine {
         startNetworkMonitor()
     }
 
+    deinit {
+        networkMonitor.cancel()
+    }
+
     private func startNetworkMonitor() {
         networkMonitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor [weak self] in

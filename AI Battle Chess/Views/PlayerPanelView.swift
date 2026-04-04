@@ -220,7 +220,7 @@ struct PlayerPanelView: View {
                 if viewIndex < engine.moveHistory.count,
                    engine.moveHistory[viewIndex].piece.color == color {
                     let durations = engine.statistics.perMoveDuration[color] ?? []
-                    let moveNumber = engine.moveHistory.prefix(viewIndex + 1).filter({ $0.piece.color == color }).count
+                    let moveNumber = colorMoveNumber(upTo: viewIndex)
                     if moveNumber > 0, moveNumber <= durations.count {
                         let duration = durations[moveNumber - 1]
                         Label(formatDuration(duration), systemImage: "stopwatch")
@@ -522,6 +522,15 @@ struct PlayerPanelView: View {
     }
 
     // MARK: - Helpers
+
+    /// Number of moves this player's color has made up to (and including) the given history index.
+    private func colorMoveNumber(upTo viewIndex: Int) -> Int {
+        var count = 0
+        for i in 0...viewIndex where engine.moveHistory[i].piece.color == color {
+            count += 1
+        }
+        return count
+    }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
         if seconds < 1 {
