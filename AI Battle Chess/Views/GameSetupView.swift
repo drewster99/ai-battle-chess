@@ -312,7 +312,7 @@ struct GameSetupView: View {
                 Spacer()
 
                 Button("Load") {
-                    engine.loadGame(pgn: pgnText)
+                    engine.importPGN(pgnText)
                     if engine.errorMessage != nil {
                         // Leave the PGN sheet open so the user sees the error
                     } else {

@@ -175,7 +175,7 @@ struct ChessBoardView: View {
                     .foregroundStyle(.white)
 
                 HStack(spacing: 12) {
-                    ForEach([PieceType.queen, .knight], id: \.self) { type in
+                    ForEach([PieceType.queen, .rook, .bishop, .knight], id: \.self) { type in
                         Button {
                             engine.selectPromotion(type)
                         } label: {

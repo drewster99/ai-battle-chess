@@ -131,11 +131,13 @@ final class AppleIntelligenceService {
                     requestBody: Data(currentPrompt.utf8)
                 )
 
+                let requestSentAt = Date()
                 let response = try await session.respond(
                     to: currentPrompt,
                     generating: ChessMoveResponse.self,
                     options: options
                 )
+                let responseReceivedAt = Date()
 
                 consecutiveErrors = 0
                 let generated = response.content
@@ -186,7 +188,9 @@ final class AppleIntelligenceService {
                     providerName: "Apple Intelligence",
                     tokenUsage: nil,
                     guidedGenerationResult: guidedResult,
-                    attempts: attempts
+                    attempts: attempts,
+                    requestTimestamp: requestSentAt,
+                    responseTimestamp: responseReceivedAt
                 )
 
                 // Check for resignation or draw claim

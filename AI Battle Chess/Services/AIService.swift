@@ -434,7 +434,9 @@ final class AIService {
 
                 print("[AIService] Attempt \(attempt + 1)/\(AIService.maxRetries) — sending request...")
 
+                let requestSentAt = Date()
                 let (data, response) = try await llmURLSession.data(for: request)
+                let responseReceivedAt = Date()
 
                 AILogger.logResponse(
                     gameID: gameID,
@@ -497,7 +499,9 @@ final class AIService {
                         providerName: provider?.name ?? "Unknown",
                         tokenUsage: tokenUsage,
                         guidedGenerationResult: nil,
-                        attempts: attempts
+                        attempts: attempts,
+                        requestTimestamp: requestSentAt,
+                        responseTimestamp: responseReceivedAt
                     )
                     switch specialResult {
                     case .resignation(let winner):
@@ -518,7 +522,9 @@ final class AIService {
                     providerName: provider?.name ?? "Unknown",
                     tokenUsage: tokenUsage,
                     guidedGenerationResult: nil,
-                    attempts: attempts
+                    attempts: attempts,
+                    requestTimestamp: requestSentAt,
+                    responseTimestamp: responseReceivedAt
                 )
 
                 // Parse the move

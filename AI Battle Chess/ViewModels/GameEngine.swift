@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import SwiftLLMKit
 import Observation
+import Network
 
 // MARK: - Game Engine
 
@@ -73,6 +74,13 @@ final class GameEngine {
     private var animationTask: Task<Void, Never>? = nil
     private var gameFinalized: Bool = false
 
+    // MARK: - Network Monitoring
+
+    /// Detects connectivity changes (e.g., sleep/wake) and cancels stale AI requests
+    /// so the retry logic can establish a fresh connection immediately.
+    private let networkMonitor = NWPathMonitor()
+    private var networkWasUnsatisfied = false
+
     // MARK: - Init
 
     init(llmKit: LLMKitManager, gameHistoryManager: GameHistoryManager, humanPlayerManager: HumanPlayerManager, appleIntelligenceConfigManager: AppleIntelligenceConfigManager) {
@@ -86,6 +94,29 @@ final class GameEngine {
         } else {
             self.appleIntelligenceService = nil
         }
+        startNetworkMonitor()
+    }
+
+    private func startNetworkMonitor() {
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if path.status == .unsatisfied {
+                    self.networkWasUnsatisfied = true
+                } else if path.status == .satisfied, self.networkWasUnsatisfied {
+                    self.networkWasUnsatisfied = false
+                    guard self.isAIThinking else { return }
+                    print("[GameEngine] Network restored after disruption — restarting AI request")
+                    self.aiTask?.cancel()
+                    self.aiTask = nil
+                    self.isAIThinking = false
+                    self.currentAIColor = nil
+                    self.errorMessage = nil
+                    self.triggerAIMoveIfNeeded()
+                }
+            }
+        }
+        networkMonitor.start(queue: DispatchQueue(label: "ai-battle-chess.network-monitor"))
     }
 
     // MARK: - Computed Helpers
@@ -861,10 +892,21 @@ final class GameEngine {
 
     // MARK: - Game Loading
 
-    /// Loads a game from PGN notation.
-    func loadGame(pgn: String) {
+    /// Imports a PGN from external input, resetting all navigation state.
+    func importPGN(_ pgn: String) {
+        viewingGameIndex = nil
+        liveGameSnapshot = nil
+        loadGame(pgn: pgn)
+    }
+
+    /// Loads a game from PGN notation. Does not reset navigation state
+    /// (`viewingGameIndex`, `liveGameSnapshot`) — callers that need a full
+    /// reset should use `importPGN(_:)` instead.
+    private func loadGame(pgn: String) {
         aiTask?.cancel()
         aiTask = nil
+        animationTask?.cancel()
+        animationTask = nil
 
         board = ChessBoard()
         moveHistory = []
@@ -878,10 +920,13 @@ final class GameEngine {
         animatingMove = nil
         animatingFileDelta = 0
         animatingRankDelta = 0
+        pendingPromotion = nil
         errorMessage = nil
         isAIThinking = false
+        currentAIColor = nil
         currentAIActivity = [:]
         aiActivityHistory = [.white: [], .black: []]
+        gameFinalized = false
         statistics = GameStatistics()
         positionCounts = [board.positionKey: 1]
         moveSANCache = []

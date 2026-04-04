@@ -474,6 +474,8 @@ struct AIActivityLog: Sendable, Equatable {
     let tokenUsage: TokenUsage?
     let guidedGenerationResult: AIGuidedGenerationResult?
     var attempts: [AITurnAttempt]
+    let requestTimestamp: Date?
+    let responseTimestamp: Date?
 }
 
 // MARK: - Token Usage

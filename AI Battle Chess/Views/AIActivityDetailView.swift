@@ -17,6 +17,8 @@ struct AIActivityDetail: Codable, Hashable, Identifiable {
     let thinkingBudget: Int?
     let maxOutputTokens: Int?
     let elapsed: TimeInterval
+    let requestTimestamp: Date?
+    let responseTimestamp: Date?
 
     init(from log: AIActivityLog, moveNumber: Int, color: PieceColor, elapsed: TimeInterval) {
         self.id = UUID()
@@ -32,6 +34,8 @@ struct AIActivityDetail: Codable, Hashable, Identifiable {
         self.thinkingBudget = log.thinkingBudget
         self.maxOutputTokens = log.maxOutputTokens
         self.elapsed = elapsed
+        self.requestTimestamp = log.requestTimestamp
+        self.responseTimestamp = log.responseTimestamp
     }
 }
 
@@ -59,6 +63,14 @@ struct AITurnAttemptSnapshot: Codable, Hashable, Identifiable {
 struct AIActivityDetailView: View {
     let detail: AIActivityDetail
 
+    @State private var showFormattedJSON = false
+
+    private static let timestampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+        return f
+    }()
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -78,12 +90,12 @@ struct AIActivityDetailView: View {
                 Divider()
 
                 // User Prompt (conversation for this turn)
-                promptSection(title: "User Prompt", content: detail.userPrompt)
+                promptSection(title: "User Prompt", content: detail.userPrompt, timestamp: detail.requestTimestamp)
 
                 Divider()
 
                 // Raw Response
-                promptSection(title: "Response", content: detail.responseText)
+                responseSection
             }
             .padding(16)
         }
@@ -206,14 +218,105 @@ struct AIActivityDetailView: View {
         }
     }
 
+    // MARK: - Response Section
+
+    private var responseSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Response")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+
+                if let ts = detail.responseTimestamp {
+                    Text(Self.timestampFormatter.string(from: ts))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                Button {
+                    showFormattedJSON.toggle()
+                } label: {
+                    Label(showFormattedJSON ? "Raw" : "Format JSON",
+                          systemImage: showFormattedJSON ? "text.alignleft" : "curlybraces")
+                        .font(.caption2)
+                }
+                .buttonStyle(.borderless)
+
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(detail.responseText, forType: .string)
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                        .font(.caption2)
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if showFormattedJSON {
+                let formatted = prettyPrintJSON(detail.responseText)
+                Text(formatted.text)
+                    .font(.caption2.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(.textBackgroundColor))
+                    )
+                if let error = formatted.error {
+                    Text("JSON format error: \(error)")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .italic()
+                }
+            } else {
+                Text(detail.responseText)
+                    .font(.caption2.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(.textBackgroundColor))
+                    )
+            }
+        }
+    }
+
+    /// Attempts to parse and pretty-print a JSON string.
+    private func prettyPrintJSON(_ raw: String) -> (text: String, error: String?) {
+        guard let data = raw.data(using: .utf8) else {
+            return (text: raw, error: "Could not encode string as UTF-8")
+        }
+        do {
+            let jsonObject = try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
+            let prettyData = try JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys])
+            if let prettyString = String(data: prettyData, encoding: .utf8) {
+                return (text: prettyString, error: nil)
+            }
+            return (text: raw, error: "Could not decode formatted JSON as UTF-8")
+        } catch {
+            return (text: raw, error: error.localizedDescription)
+        }
+    }
+
     // MARK: - Prompt Section
 
-    private func promptSection(title: String, content: String) -> some View {
+    private func promptSection(title: String, content: String, timestamp: Date? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
+
+                if let ts = timestamp {
+                    Text(Self.timestampFormatter.string(from: ts))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+
                 Spacer()
                 Button {
                     NSPasteboard.general.clearContents()
