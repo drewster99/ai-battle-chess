@@ -111,11 +111,14 @@ final class GameEngine {
                     self.networkWasUnsatisfied = false
                     guard self.isAIThinking else { return }
                     print("[GameEngine] Network restored after disruption — restarting AI request")
-                    self.aiTask?.cancel()
+                    let staleTask = self.aiTask
                     self.aiTask = nil
                     self.isAIThinking = false
                     self.currentAIColor = nil
                     self.errorMessage = nil
+                    staleTask?.cancel()
+                    await staleTask?.value
+                    guard self.aiTask == nil else { return }
                     self.triggerAIMoveIfNeeded()
                 }
             }
