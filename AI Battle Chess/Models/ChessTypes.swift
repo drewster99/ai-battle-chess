@@ -440,6 +440,27 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
     let humanTime: TimeInterval
     let aiTime: TimeInterval
 
+    /// Reconstructs a `PlayerConfig` from the stored record fields.
+    /// Fields not persisted in the record (AI config IDs, etc.) fall back to `PlayerConfig` defaults.
+    func playerConfig(for color: PieceColor) -> PlayerConfig {
+        switch color {
+        case .white:
+            return PlayerConfig(
+                name: whitePlayerName,
+                isAI: whitePlayerIsAI,
+                color: .white,
+                humanPlayerID: whitePlayerID
+            )
+        case .black:
+            return PlayerConfig(
+                name: blackPlayerName,
+                isAI: blackPlayerIsAI,
+                color: .black,
+                humanPlayerID: blackPlayerID
+            )
+        }
+    }
+
     init(
         id: UUID,
         startTime: Date,

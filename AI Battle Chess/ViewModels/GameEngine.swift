@@ -887,23 +887,10 @@ final class GameEngine {
         currentGameID = record.id
         gameMode = record.gameMode
 
-        // Restore player identity so the UI reflects the historical game.
-        // Clear config IDs since GameRecord doesn't store them — avoids showing
-        // the live game's AI config for a different historical player.
-        whitePlayer.name = record.whitePlayerName
-        whitePlayer.isAI = record.whitePlayerIsAI
-        whitePlayer.humanPlayerID = record.whitePlayerID
-        whitePlayer.aiConfigurationID = nil
-        whitePlayer.useAppleIntelligence = false
-        whitePlayer.appleIntelligenceConfigID = nil
-        whitePlayer.allowResign = true
-        blackPlayer.name = record.blackPlayerName
-        blackPlayer.isAI = record.blackPlayerIsAI
-        blackPlayer.humanPlayerID = record.blackPlayerID
-        blackPlayer.aiConfigurationID = nil
-        blackPlayer.useAppleIntelligence = false
-        blackPlayer.appleIntelligenceConfigID = nil
-        blackPlayer.allowResign = true
+        // Rebuild players from the record so fields not persisted (AI config
+        // IDs, etc.) get safe defaults instead of leaking from the live game.
+        whitePlayer = record.playerConfig(for: .white)
+        blackPlayer = record.playerConfig(for: .black)
 
         statusMessage = "Viewing game #\(record.id.uuidString.prefix(8))"
     }
