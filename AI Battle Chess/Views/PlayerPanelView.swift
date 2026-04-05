@@ -192,7 +192,40 @@ struct PlayerPanelView: View {
                 configRow(label: "Resign", value: player.allowResign ? "Allowed" : "Not allowed")
             }
             .font(.caption2)
+        } else if let snapshot = player.aiConfigSnapshot {
+            aiConfigFromSnapshot(snapshot)
         }
+    }
+
+    @ViewBuilder
+    private func aiConfigFromSnapshot(_ snapshot: AIConfigSnapshot) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 2) {
+            if snapshot.useAppleIntelligence {
+                configRow(label: "Model", value: snapshot.appleIntelligenceConfigName ?? "Apple Intelligence")
+                if let sampling = snapshot.appleIntelligenceSamplingDescription {
+                    configRow(label: "Sampling", value: sampling)
+                }
+                if snapshot.temperature != 0 {
+                    configRow(label: "Temp", value: String(format: "%.2f", snapshot.temperature))
+                }
+                if snapshot.maxOutputTokens != 0 {
+                    configRow(label: "Max tokens", value: "\(snapshot.maxOutputTokens)")
+                }
+            } else {
+                if let provider = snapshot.providerName {
+                    configRow(label: "Provider", value: provider)
+                }
+                configRow(label: "Model", value: snapshot.modelID)
+                configRow(label: "Temp", value: String(format: "%.1f", snapshot.temperature))
+                configRow(label: "Max tokens", value: "\(snapshot.maxOutputTokens)")
+                configRow(label: "Context", value: "\(snapshot.maxContextTokens)")
+                if let budget = snapshot.thinkingBudget {
+                    configRow(label: "Thinking", value: "\(budget)")
+                }
+            }
+            configRow(label: "Resign", value: snapshot.allowResign ? "Allowed" : "Not allowed")
+        }
+        .font(.caption2)
     }
 
     private func configRow(label: String, value: String) -> some View {

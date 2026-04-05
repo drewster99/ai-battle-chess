@@ -361,6 +361,8 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
     var color: PieceColor
     var humanPlayerID: UUID?  // References HumanPlayer.id for human players
     var allowResign: Bool
+    /// Snapshot of the AI configuration used, for display in historical games.
+    var aiConfigSnapshot: AIConfigSnapshot?
 
     init(
         name: String = "Player",
@@ -371,6 +373,7 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
         color: PieceColor = .white,
         humanPlayerID: UUID? = nil,
         allowResign: Bool = true,
+        aiConfigSnapshot: AIConfigSnapshot? = nil,
         id: UUID = UUID()
     ) {
         self.id = id
@@ -382,7 +385,27 @@ struct PlayerConfig: Equatable, Sendable, Codable, Identifiable {
         self.color = color
         self.humanPlayerID = humanPlayerID
         self.allowResign = allowResign
+        self.aiConfigSnapshot = aiConfigSnapshot
     }
+}
+
+// MARK: - AI Config Snapshot
+
+/// Point-in-time snapshot of the AI configuration used during a game,
+/// so historical games can display provider/model details without
+/// requiring the original configuration to still exist.
+struct AIConfigSnapshot: Codable, Sendable, Equatable {
+    let providerName: String?
+    let modelID: String
+    let temperature: Double
+    let maxOutputTokens: Int
+    let maxContextTokens: Int
+    let thinkingBudget: Int?
+    let allowResign: Bool
+    let useAppleIntelligence: Bool
+    /// Apple Intelligence config name (e.g. "Default", "Creative")
+    let appleIntelligenceConfigName: String?
+    let appleIntelligenceSamplingDescription: String?
 }
 
 // MARK: - AI Penalty
@@ -439,6 +462,8 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
     let statistics: GameStatistics
     let humanTime: TimeInterval
     let aiTime: TimeInterval
+    let whiteAIConfig: AIConfigSnapshot?
+    let blackAIConfig: AIConfigSnapshot?
 
     /// Reconstructs a `PlayerConfig` from the stored record fields.
     /// Fields not persisted in the record (AI config IDs, etc.) fall back to `PlayerConfig` defaults.
@@ -449,14 +474,18 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
                 name: whitePlayerName,
                 isAI: whitePlayerIsAI,
                 color: .white,
-                humanPlayerID: whitePlayerID
+                humanPlayerID: whitePlayerID,
+                allowResign: whiteAIConfig?.allowResign ?? true,
+                aiConfigSnapshot: whiteAIConfig
             )
         case .black:
             return PlayerConfig(
                 name: blackPlayerName,
                 isAI: blackPlayerIsAI,
                 color: .black,
-                humanPlayerID: blackPlayerID
+                humanPlayerID: blackPlayerID,
+                allowResign: blackAIConfig?.allowResign ?? true,
+                aiConfigSnapshot: blackAIConfig
             )
         }
     }
@@ -477,7 +506,9 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
         pgnText: String,
         statistics: GameStatistics,
         humanTime: TimeInterval,
-        aiTime: TimeInterval
+        aiTime: TimeInterval,
+        whiteAIConfig: AIConfigSnapshot? = nil,
+        blackAIConfig: AIConfigSnapshot? = nil
     ) {
         self.id = id
         self.startTime = startTime
@@ -495,6 +526,8 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
         self.statistics = statistics
         self.humanTime = humanTime
         self.aiTime = aiTime
+        self.whiteAIConfig = whiteAIConfig
+        self.blackAIConfig = blackAIConfig
     }
 
     /// Decodes legacy records that lack the `whitePlayerIsAI`/`blackPlayerIsAI` keys
@@ -520,6 +553,8 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
             ?? Self.inferIsAI(gameMode: gameMode, playerID: whitePlayerID, otherPlayerID: blackPlayerID, isWhite: true)
         blackPlayerIsAI = try container.decodeIfPresent(Bool.self, forKey: .blackPlayerIsAI)
             ?? Self.inferIsAI(gameMode: gameMode, playerID: blackPlayerID, otherPlayerID: whitePlayerID, isWhite: false)
+        whiteAIConfig = try container.decodeIfPresent(AIConfigSnapshot.self, forKey: .whiteAIConfig)
+        blackAIConfig = try container.decodeIfPresent(AIConfigSnapshot.self, forKey: .blackAIConfig)
     }
 
     /// Infers whether a player was AI from the game mode and available player IDs.

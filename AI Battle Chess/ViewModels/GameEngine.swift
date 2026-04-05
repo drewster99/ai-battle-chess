@@ -307,10 +307,52 @@ final class GameEngine {
             pgnText: currentPGN,
             statistics: statistics,
             humanTime: humanTime,
-            aiTime: aiTime
+            aiTime: aiTime,
+            whiteAIConfig: aiConfigSnapshot(for: whitePlayer),
+            blackAIConfig: aiConfigSnapshot(for: blackPlayer)
         )
 
         gameHistoryManager.save(record)
+    }
+
+    /// Captures a point-in-time snapshot of the AI configuration for a player.
+    private func aiConfigSnapshot(for player: PlayerConfig) -> AIConfigSnapshot? {
+        guard player.isAI else { return nil }
+
+        if player.useAppleIntelligence {
+            let aiCfg = player.appleIntelligenceConfigID
+                .flatMap { appleIntelligenceConfigManager.config(byID: $0) }
+            return AIConfigSnapshot(
+                providerName: nil,
+                modelID: aiCfg?.name ?? "Apple Intelligence",
+                temperature: aiCfg?.temperature ?? 0,
+                maxOutputTokens: aiCfg?.maximumResponseTokens ?? 0,
+                maxContextTokens: 0,
+                thinkingBudget: nil,
+                allowResign: player.allowResign,
+                useAppleIntelligence: true,
+                appleIntelligenceConfigName: aiCfg?.name,
+                appleIntelligenceSamplingDescription: aiCfg?.samplingDescription
+            )
+        }
+
+        guard let configID = player.aiConfigurationID,
+              let config = llmKit.configurations.first(where: { $0.id == configID }) else {
+            return nil
+        }
+        let provider = llmKit.providers.first(where: { $0.id == config.providerID })
+        return AIConfigSnapshot(
+            providerName: provider?.name,
+            modelID: config.modelID,
+            temperature: config.temperature,
+            maxOutputTokens: config.maxOutputTokens,
+            maxContextTokens: config.maxContextTokens,
+            thinkingBudget: config.thinkingBudget,
+            allowResign: player.allowResign,
+            useAppleIntelligence: false,
+            appleIntelligenceConfigName: nil,
+            appleIntelligenceSamplingDescription: nil
+        )
     }
 
     // MARK: - Square Selection & Human Move
@@ -988,7 +1030,7 @@ final class GameEngine {
         }
 
         if !moveHistory.isEmpty {
-            viewingMoveIndex = 0
+            viewingMoveIndex = moveHistory.count - 1
         }
     }
 

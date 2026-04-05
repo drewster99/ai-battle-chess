@@ -11,6 +11,9 @@ When the next move arrives before the current piece animation finishes, the anim
 ### Resume Game on Relaunch
 If the app crashes, is closed, or is otherwise terminated during an active game, there is currently no way to resume that game on next launch. Since we already save move-by-move board state, this should be straightforward — persist the active game's state (player configs, move history, board states) and offer to resume on next launch.
 
+### Persist AI Activity Logs in Game History
+When viewing historical games, the AI Activity section shows "No moves yet" because the full prompt/response/token data is only held in memory during the live game. Make `AIActivityLog` and its nested types (`AITurnAttempt`, `TokenUsage`, `AIGuidedGenerationResult`) `Codable`, add an `aiActivityHistory` field to `GameRecord`, save it in `finalizeCurrentGame()`, and restore it in `loadGameRecord()`. The `AIConfigSnapshot` pattern is a good reference for the approach.
+
 ### Copy PGN/FEN Should Match Displayed State
 Copy FEN already respects the currently displayed position (via `displayBoard`). However, Copy PGN always exports the live game's full move history — it does not reflect mid-game navigation (`viewingMoveIndex`) or past game viewing (`viewingGameIndex`). PGN export should truncate moves to the viewed position when navigating history, and export the past game's data when viewing a past game.
 
