@@ -602,19 +602,29 @@ final class AIService {
 
                 onError?("\(label): \(error.localizedDescription) (attempt \(attempt + 1)/\(AIService.maxRetries))")
 
+                // Non-retryable HTTP errors (client errors that won't change on retry).
+                // 429 (rate limit) and 408 (request timeout) are retryable.
+                let retryableClientErrors: Set<Int> = [408, 429]
+                let isNonRetryable: Bool = {
+                    if case .httpError(let statusCode) = error as? AIError,
+                       (400...499).contains(statusCode), !retryableClientErrors.contains(statusCode) {
+                        return true
+                    }
+                    return false
+                }()
+
+                let isTerminal = isNonRetryable || attempt >= AIService.maxRetries - 1
                 let penalty = AIPenalty(
                     reason: "\(label): \(error.localizedDescription) (attempt \(attempt + 1))",
-                    severity: attempt >= AIService.maxRetries - 1 ? .critical : .major,
+                    severity: isTerminal ? .critical : .major,
                     timestamp: Date()
                 )
                 penalties.append(penalty)
                 retries += 1
                 consecutiveErrors += 1
 
-                // Non-retryable HTTP errors (client errors that won't change on retry)
-                if case .httpError(let statusCode) = error as? AIError,
-                   (400...499).contains(statusCode), statusCode != 429 {
-                    print("[AIService] FATAL: HTTP \(statusCode) is not retryable")
+                if isNonRetryable {
+                    print("[AIService] FATAL: HTTP error is not retryable")
                     print("[AIService] ====== END REQUEST (FAILURE) ======")
                     throw AIServiceFailure(
                         underlyingError: error,
