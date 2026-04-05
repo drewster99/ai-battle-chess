@@ -267,8 +267,15 @@ struct GameSetupView: View {
                 Text("Select...").tag(nil as AISelection?)
 
                 if appleIntelligenceAvailable {
-                    Section("Apple Intelligence") {
-                        ForEach(engine.appleIntelligenceConfigManager.configs) { config in
+                    let aiConfigs = engine.appleIntelligenceConfigManager.configs
+                    if aiConfigs.count > 1 {
+                        Section("Apple Intelligence") {
+                            ForEach(aiConfigs) { config in
+                                Text(config.name).tag(AISelection.appleIntelligence(config.id) as AISelection?)
+                            }
+                        }
+                    } else {
+                        ForEach(aiConfigs) { config in
                             Text(config.name).tag(AISelection.appleIntelligence(config.id) as AISelection?)
                         }
                     }

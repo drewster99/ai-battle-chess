@@ -144,7 +144,6 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_ASSET_PATHS = "\"AI Battle Chess/Preview Content\"";
 				DEVELOPMENT_TEAM = P8MA38JTXY;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -295,7 +294,6 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_ASSET_PATHS = "\"AI Battle Chess/Preview Content\"";
 				DEVELOPMENT_TEAM = P8MA38JTXY;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -341,7 +339,7 @@
 			repositoryURL = "git@github.com:drewster99/swift-llm-kit.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.0.7;
+				minimumVersion = 0.0.9;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
