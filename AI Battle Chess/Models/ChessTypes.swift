@@ -430,6 +430,8 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
     let blackPlayerName: String
     let whitePlayerID: UUID?  // HumanPlayer.id for human players, nil for AI or legacy records
     let blackPlayerID: UUID?  // HumanPlayer.id for human players, nil for AI or legacy records
+    let whitePlayerIsAI: Bool
+    let blackPlayerIsAI: Bool
     let gameMode: GameMode
     let result: GameResult
     let moveCount: Int
@@ -437,6 +439,80 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
     let statistics: GameStatistics
     let humanTime: TimeInterval
     let aiTime: TimeInterval
+
+    init(
+        id: UUID,
+        startTime: Date,
+        endTime: Date,
+        whitePlayerName: String,
+        blackPlayerName: String,
+        whitePlayerID: UUID?,
+        blackPlayerID: UUID?,
+        whitePlayerIsAI: Bool,
+        blackPlayerIsAI: Bool,
+        gameMode: GameMode,
+        result: GameResult,
+        moveCount: Int,
+        pgnText: String,
+        statistics: GameStatistics,
+        humanTime: TimeInterval,
+        aiTime: TimeInterval
+    ) {
+        self.id = id
+        self.startTime = startTime
+        self.endTime = endTime
+        self.whitePlayerName = whitePlayerName
+        self.blackPlayerName = blackPlayerName
+        self.whitePlayerID = whitePlayerID
+        self.blackPlayerID = blackPlayerID
+        self.whitePlayerIsAI = whitePlayerIsAI
+        self.blackPlayerIsAI = blackPlayerIsAI
+        self.gameMode = gameMode
+        self.result = result
+        self.moveCount = moveCount
+        self.pgnText = pgnText
+        self.statistics = statistics
+        self.humanTime = humanTime
+        self.aiTime = aiTime
+    }
+
+    /// Decodes legacy records that lack the `whitePlayerIsAI`/`blackPlayerIsAI` keys
+    /// by inferring from `gameMode` and player IDs.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        startTime = try container.decode(Date.self, forKey: .startTime)
+        endTime = try container.decode(Date.self, forKey: .endTime)
+        whitePlayerName = try container.decode(String.self, forKey: .whitePlayerName)
+        blackPlayerName = try container.decode(String.self, forKey: .blackPlayerName)
+        whitePlayerID = try container.decodeIfPresent(UUID.self, forKey: .whitePlayerID)
+        blackPlayerID = try container.decodeIfPresent(UUID.self, forKey: .blackPlayerID)
+        gameMode = try container.decode(GameMode.self, forKey: .gameMode)
+        result = try container.decode(GameResult.self, forKey: .result)
+        moveCount = try container.decode(Int.self, forKey: .moveCount)
+        pgnText = try container.decode(String.self, forKey: .pgnText)
+        statistics = try container.decode(GameStatistics.self, forKey: .statistics)
+        humanTime = try container.decode(TimeInterval.self, forKey: .humanTime)
+        aiTime = try container.decode(TimeInterval.self, forKey: .aiTime)
+
+        whitePlayerIsAI = try container.decodeIfPresent(Bool.self, forKey: .whitePlayerIsAI)
+            ?? Self.inferIsAI(gameMode: gameMode, playerID: whitePlayerID, otherPlayerID: blackPlayerID, isWhite: true)
+        blackPlayerIsAI = try container.decodeIfPresent(Bool.self, forKey: .blackPlayerIsAI)
+            ?? Self.inferIsAI(gameMode: gameMode, playerID: blackPlayerID, otherPlayerID: whitePlayerID, isWhite: false)
+    }
+
+    /// Infers whether a player was AI from the game mode and available player IDs.
+    private static func inferIsAI(gameMode: GameMode, playerID: UUID?, otherPlayerID: UUID?, isWhite: Bool) -> Bool {
+        switch gameMode {
+        case .aiVsAI: return true
+        case .playerVsPlayer: return false
+        case .playerVsAI:
+            if playerID != nil { return false }
+            if otherPlayerID != nil { return true }
+            // Both IDs nil (legacy records): default to white=human, black=AI
+            return !isWhite
+        }
+    }
 }
 
 // MARK: - AI Activity Log

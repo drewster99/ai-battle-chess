@@ -25,6 +25,7 @@ struct AIBattleChessApp: App {
             .onAppear {
                 llmKit.load()
                 gameHistoryManager.loadAll()
+                gameHistoryManager.migrateIsAIFlagsIfNeeded()
                 humanPlayerManager.loadAll()
                 appleIntelligenceConfigManager.loadAll()
                 let gameEngine = GameEngine(llmKit: llmKit, gameHistoryManager: gameHistoryManager, humanPlayerManager: humanPlayerManager, appleIntelligenceConfigManager: appleIntelligenceConfigManager)

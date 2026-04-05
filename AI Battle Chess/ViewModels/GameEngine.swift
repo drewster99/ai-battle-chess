@@ -299,6 +299,8 @@ final class GameEngine {
             blackPlayerName: blackPlayer.name,
             whitePlayerID: whitePlayer.isAI ? nil : whitePlayer.humanPlayerID,
             blackPlayerID: blackPlayer.isAI ? nil : blackPlayer.humanPlayerID,
+            whitePlayerIsAI: whitePlayer.isAI,
+            blackPlayerIsAI: blackPlayer.isAI,
             gameMode: gameMode,
             result: result,
             moveCount: moveHistory.count,
@@ -883,6 +885,16 @@ final class GameEngine {
         statistics = record.statistics
         gameResult = record.result
         currentGameID = record.id
+        gameMode = record.gameMode
+
+        // Restore player identity so the UI reflects the historical game
+        whitePlayer.name = record.whitePlayerName
+        whitePlayer.isAI = record.whitePlayerIsAI
+        whitePlayer.humanPlayerID = record.whitePlayerID
+        blackPlayer.name = record.blackPlayerName
+        blackPlayer.isAI = record.blackPlayerIsAI
+        blackPlayer.humanPlayerID = record.blackPlayerID
+
         statusMessage = "Viewing game #\(record.id.uuidString.prefix(8))"
     }
 

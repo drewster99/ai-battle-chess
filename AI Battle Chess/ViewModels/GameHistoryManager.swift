@@ -99,6 +99,28 @@ final class GameHistoryManager {
         }
     }
 
+    /// Re-saves all loaded records so that `whitePlayerIsAI`/`blackPlayerIsAI` fields
+    /// (inferred from `gameMode` during decoding) are persisted to disk. Runs once per install.
+    func migrateIsAIFlagsIfNeeded() {
+        let key = "GameHistoryManager.isAIMigrationComplete"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+
+        var migrated = 0
+        for record in gameRecords {
+            let fileURL = gameDirectory(for: record.id).appendingPathComponent(Self.gameFileName)
+            do {
+                let data = try encoder.encode(record)
+                try data.write(to: fileURL, options: .atomic)
+                migrated += 1
+            } catch {
+                print("[GameHistoryManager] Migration failed for game \(record.id): \(error)")
+            }
+        }
+
+        UserDefaults.standard.set(true, forKey: key)
+        print("[GameHistoryManager] Migrated isAI flags for \(migrated) game(s)")
+    }
+
     /// Scans all UUID subdirectories under the games root and loads each `game.json`.
     ///
     /// Records that fail to decode are logged and skipped. The resulting array is sorted
