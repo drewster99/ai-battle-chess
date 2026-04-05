@@ -610,6 +610,20 @@ final class AIService {
                 penalties.append(penalty)
                 retries += 1
                 consecutiveErrors += 1
+
+                // Non-retryable HTTP errors (client errors that won't change on retry)
+                if case .httpError(let statusCode) = error as? AIError,
+                   (400...499).contains(statusCode), statusCode != 429 {
+                    print("[AIService] FATAL: HTTP \(statusCode) is not retryable")
+                    print("[AIService] ====== END REQUEST (FAILURE) ======")
+                    throw AIServiceFailure(
+                        underlyingError: error,
+                        penalties: penalties,
+                        retries: retries,
+                        lastActivityLog: lastActivityLog
+                    )
+                }
+
                 if attempt >= AIService.maxRetries - 1 {
                     print("[AIService] FATAL: All \(AIService.maxRetries) attempts failed")
                     print("[AIService] ====== END REQUEST (FAILURE) ======")
