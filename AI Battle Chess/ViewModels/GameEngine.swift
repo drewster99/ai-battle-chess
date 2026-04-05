@@ -320,19 +320,20 @@ final class GameEngine {
         guard player.isAI else { return nil }
 
         if player.useAppleIntelligence {
-            let aiCfg = player.appleIntelligenceConfigID
+            let appleIntelligenceConfig = player.appleIntelligenceConfigID
                 .flatMap { appleIntelligenceConfigManager.config(byID: $0) }
+                ?? appleIntelligenceConfigManager.configs.first
             return AIConfigSnapshot(
                 providerName: nil,
-                modelID: aiCfg?.name ?? "Apple Intelligence",
-                temperature: aiCfg?.temperature ?? 0,
-                maxOutputTokens: aiCfg?.maximumResponseTokens ?? 0,
+                modelID: "Apple Intelligence",
+                temperature: appleIntelligenceConfig?.temperature ?? 0,
+                maxOutputTokens: appleIntelligenceConfig?.maximumResponseTokens ?? 0,
                 maxContextTokens: 0,
                 thinkingBudget: nil,
                 allowResign: player.allowResign,
                 useAppleIntelligence: true,
-                appleIntelligenceConfigName: aiCfg?.name,
-                appleIntelligenceSamplingDescription: aiCfg?.samplingDescription
+                appleIntelligenceConfigName: appleIntelligenceConfig?.name,
+                appleIntelligenceSamplingDescription: appleIntelligenceConfig?.samplingDescription
             )
         }
 
@@ -935,6 +936,15 @@ final class GameEngine {
         blackPlayer = record.playerConfig(for: .black)
 
         statusMessage = "Viewing game #\(record.id.uuidString.prefix(8))"
+    }
+
+    /// The move to highlight on the board — the viewed move during history navigation,
+    /// or the last played move during live play.
+    var displayedMove: ChessMove? {
+        if let index = viewingMoveIndex, index < moveHistory.count {
+            return moveHistory[index]
+        }
+        return lastMove
     }
 
     /// The board state to display (either historical or live).

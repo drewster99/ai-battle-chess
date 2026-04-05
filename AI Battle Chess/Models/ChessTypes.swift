@@ -467,6 +467,7 @@ struct GameRecord: Codable, Sendable, Equatable, Identifiable {
 
     /// Reconstructs a `PlayerConfig` from the stored record fields.
     /// Fields not persisted in the record (AI config IDs, etc.) fall back to `PlayerConfig` defaults.
+    /// Records saved before AI config snapshots were added will default `allowResign` to `true`.
     func playerConfig(for color: PieceColor) -> PlayerConfig {
         switch color {
         case .white:

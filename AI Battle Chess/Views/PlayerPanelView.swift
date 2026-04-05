@@ -158,14 +158,14 @@ struct PlayerPanelView: View {
 
     @ViewBuilder
     private var aiConfigDetails: some View {
-        if player.useAppleIntelligence, let aiCfg = appleIntelligenceConfig {
+        if player.useAppleIntelligence, let intelligenceConfig = appleIntelligenceConfig {
             Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 2) {
-                configRow(label: "Model", value: aiCfg.name)
-                configRow(label: "Sampling", value: aiCfg.samplingDescription)
-                if let temp = aiCfg.temperature {
+                configRow(label: "Model", value: intelligenceConfig.name)
+                configRow(label: "Sampling", value: intelligenceConfig.samplingDescription)
+                if let temp = intelligenceConfig.temperature {
                     configRow(label: "Temp", value: String(format: "%.2f", temp))
                 }
-                if let maxTokens = aiCfg.maximumResponseTokens {
+                if let maxTokens = intelligenceConfig.maximumResponseTokens {
                     configRow(label: "Max tokens", value: "\(maxTokens)")
                 }
                 configRow(label: "Resign", value: player.allowResign ? "Allowed" : "Not allowed")

@@ -108,8 +108,8 @@ struct ChessBoardView: View {
 
         let isSelected = engine.selectedSquare == position
         let isLegalMove = engine.legalMovesForSelected.contains(position)
-        let isLastMoveFrom = engine.lastMove?.from == position && !engine.isViewingHistory
-        let isLastMoveTo = engine.lastMove?.to == position && !engine.isViewingHistory
+        let isLastMoveFrom = engine.displayedMove?.from == position
+        let isLastMoveTo = engine.displayedMove?.to == position
         let isKingInCheck = isKingInCheckAt(position, on: displayBoard)
 
         // Hide the piece at the destination during animation (it's rendered in the overlay)
