@@ -2,6 +2,9 @@
 
 ## Planned
 
+### Lichess Bot Integration
+Connect the app to Lichess.org as a bot player, where the app's AI engine plays against remote opponents. Includes NDJSON streaming, UCI move format, chess clock UI, challenge management, and game history with Lichess metadata. See [LICHESS_INTEGRATION_PLAN.md](LICHESS_INTEGRATION_PLAN.md) for the complete plan with API details, architecture, and phased implementation.
+
 ### Load Game from FEN
 Allow pasting a FEN string to create a new game starting from that board state. Similar to the existing "Load PGN" flow but for arbitrary positions. Requires a FEN parser on `ChessBoard` (inverse of the existing `fen` computed property) and UI in `GameSetupView` or the existing Load PGN sheet.
 
