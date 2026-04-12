@@ -27,6 +27,13 @@ struct GameSetupView: View {
     @State private var guestPromptWhiteNewName: String = ""
     @State private var guestPromptBlackPickedID: UUID? = nil
     @State private var guestPromptBlackNewName: String = ""
+    @State private var addPlayerDuplicate: HumanPlayer? = nil
+    @State private var guestPromptDuplicate: GuestDuplicateConflict? = nil
+
+    private struct GuestDuplicateConflict {
+        let whiteExisting: HumanPlayer?
+        let blackExisting: HumanPlayer?
+    }
 
     private var configurations: [ModelConfiguration] {
         engine.llmKit.configurations.filter(\.isValid)
@@ -129,18 +136,47 @@ struct GameSetupView: View {
             Button("Add") {
                 let trimmed = newPlayerName.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
-                let newPlayer = engine.humanPlayerManager.addPlayer(name: trimmed)
-                if addingPlayerForColor == .white {
-                    whiteHumanPlayerID = newPlayer.id
-                    whitePlayerName = newPlayer.name
+                if let existing = engine.humanPlayerManager.player(byName: trimmed) {
+                    addPlayerDuplicate = existing
                 } else {
-                    blackHumanPlayerID = newPlayer.id
-                    blackPlayerName = newPlayer.name
+                    let newPlayer = engine.humanPlayerManager.addPlayer(name: trimmed)
+                    applyAddedPlayer(newPlayer)
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Enter a name for the new player.")
+        }
+        .alert(
+            "Player Already Exists",
+            isPresented: Binding(
+                get: { addPlayerDuplicate != nil },
+                set: { if !$0 { addPlayerDuplicate = nil } }
+            )
+        ) {
+            Button("Use Existing") {
+                if let player = addPlayerDuplicate {
+                    applyAddedPlayer(player)
+                }
+                addPlayerDuplicate = nil
+            }
+            Button("Choose Different Name", role: .cancel) {
+                addPlayerDuplicate = nil
+                showAddPlayer = true
+            }
+        } message: {
+            Text("A player named \"\(addPlayerDuplicate?.name ?? "")\" already exists. Use the existing player or choose a different name.")
+        }
+    }
+
+    /// Sets the side currently being added on the main screen to the given player.
+    private func applyAddedPlayer(_ player: HumanPlayer) {
+        if addingPlayerForColor == .white {
+            whiteHumanPlayerID = player.id
+            whitePlayerName = player.name
+        } else {
+            blackHumanPlayerID = player.id
+            blackPlayerName = player.name
         }
     }
 
@@ -480,6 +516,46 @@ struct GameSetupView: View {
         }
         .padding(24)
         .frame(minWidth: needWhite && needBlack ? 460 : 280)
+        .alert(
+            "Player Already Exists",
+            isPresented: Binding(
+                get: { guestPromptDuplicate != nil },
+                set: { if !$0 { guestPromptDuplicate = nil } }
+            )
+        ) {
+            Button("Use Existing") {
+                if let conflict = guestPromptDuplicate {
+                    if let p = conflict.whiteExisting {
+                        guestPromptWhitePickedID = p.id
+                        guestPromptWhiteNewName = ""
+                    }
+                    if let p = conflict.blackExisting {
+                        guestPromptBlackPickedID = p.id
+                        guestPromptBlackNewName = ""
+                    }
+                }
+                guestPromptDuplicate = nil
+                performGuestPromptApply(needWhite: needWhite, needBlack: needBlack)
+            }
+            Button("Choose Different Name", role: .cancel) {
+                guestPromptDuplicate = nil
+            }
+        } message: {
+            Text(guestDuplicateMessage)
+        }
+    }
+
+    private var guestDuplicateMessage: String {
+        guard let conflict = guestPromptDuplicate else { return "" }
+        var lines: [String] = []
+        if let white = conflict.whiteExisting {
+            lines.append("White: \"\(white.name)\" already exists.")
+        }
+        if let black = conflict.blackExisting {
+            lines.append("Black: \"\(black.name)\" already exists.")
+        }
+        let prefix = lines.joined(separator: "\n")
+        return prefix + "\n\nUse the existing player(s) or choose different name(s)."
     }
 
     private func guestPromptColumn(
@@ -540,6 +616,34 @@ struct GameSetupView: View {
     }
 
     private func applyGuestPromptThenStart(needWhite: Bool, needBlack: Bool) {
+        var whiteDuplicate: HumanPlayer? = nil
+        var blackDuplicate: HumanPlayer? = nil
+
+        if needWhite, guestPromptWhitePickedID == nil {
+            let trimmed = guestPromptWhiteNewName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                whiteDuplicate = engine.humanPlayerManager.player(byName: trimmed)
+            }
+        }
+        if needBlack, guestPromptBlackPickedID == nil {
+            let trimmed = guestPromptBlackNewName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                blackDuplicate = engine.humanPlayerManager.player(byName: trimmed)
+            }
+        }
+
+        if whiteDuplicate != nil || blackDuplicate != nil {
+            guestPromptDuplicate = GuestDuplicateConflict(
+                whiteExisting: whiteDuplicate,
+                blackExisting: blackDuplicate
+            )
+            return
+        }
+
+        performGuestPromptApply(needWhite: needWhite, needBlack: needBlack)
+    }
+
+    private func performGuestPromptApply(needWhite: Bool, needBlack: Bool) {
         if needWhite {
             if let pickedID = guestPromptWhitePickedID,
                let player = engine.humanPlayerManager.player(byID: pickedID) {

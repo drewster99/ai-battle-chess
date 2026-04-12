@@ -128,6 +128,14 @@ final class HumanPlayerManager {
         players.first(where: { $0.id == id })
     }
 
+    /// Returns a player whose name matches `name` (case-insensitive, trimmed), or nil.
+    /// Includes the built-in Guest player.
+    func player(byName name: String) -> HumanPlayer? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return players.first { $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }
+    }
+
     // MARK: - Sorting
 
     /// Guest first, then alphabetical by name.
