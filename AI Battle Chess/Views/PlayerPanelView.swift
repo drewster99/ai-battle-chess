@@ -78,6 +78,9 @@ struct PlayerPanelView: View {
                     if player.isAI {
                         Divider()
                         aiActivitySection
+                    } else {
+                        Divider()
+                        humanMovesSection
                     }
 
                     Spacer()
@@ -547,6 +550,97 @@ struct PlayerPanelView: View {
                         .frame(width: 52, alignment: .trailing)
                     Text("")
                         .frame(width: 36)
+                }
+                .font(.system(size: 10).monospacedDigit().bold())
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Human Moves Section
+
+    @ViewBuilder
+    private var humanMovesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Moves")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            let moves = colorMoveEntries()
+            if moves.isEmpty {
+                Text("No moves yet")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                humanMovesGrid(moves)
+            }
+        }
+    }
+
+    /// One row in the human moves grid.
+    private struct ColorMoveEntry {
+        let historyIndex: Int   // index into engine.moveHistory / moveSANCache
+        let colorIndex: Int     // index into perMoveDuration[color]
+    }
+
+    /// All moves this color has played, paired with their per-color index for duration lookup.
+    private func colorMoveEntries() -> [ColorMoveEntry] {
+        var entries: [ColorMoveEntry] = []
+        var colorIndex = 0
+        for (historyIndex, move) in engine.moveHistory.enumerated() where move.piece.color == color {
+            entries.append(ColorMoveEntry(historyIndex: historyIndex, colorIndex: colorIndex))
+            colorIndex += 1
+        }
+        return entries
+    }
+
+    private func humanMovesGrid(_ entries: [ColorMoveEntry]) -> some View {
+        let durations = engine.statistics.perMoveDuration[color] ?? []
+        let sanCache = engine.moveSANCache
+        return VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 0) {
+                Text("#")
+                    .frame(width: 28, alignment: .trailing)
+                Text("Move")
+                    .frame(width: 60, alignment: .leading)
+                Text("Time")
+                    .frame(width: 60, alignment: .trailing)
+            }
+            .font(.system(size: 9).bold())
+            .foregroundStyle(.tertiary)
+
+            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                let elapsed = entry.colorIndex < durations.count ? durations[entry.colorIndex] : 0
+                let san = entry.historyIndex < sanCache.count ? sanCache[entry.historyIndex] : ""
+                HStack(spacing: 0) {
+                    Text("\(entry.colorIndex + 1)")
+                        .frame(width: 28, alignment: .trailing)
+                        .foregroundStyle(.secondary)
+                    Text(san)
+                        .font(.caption2.monospaced().bold())
+                        .frame(width: 60, alignment: .leading)
+                    Text(formatDuration(elapsed))
+                        .frame(width: 60, alignment: .trailing)
+                }
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(.primary)
+                .padding(.vertical, 1)
+                .background(
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(entry.colorIndex % 2 == 0 ? Color.clear : Color.primary.opacity(0.03))
+                )
+            }
+
+            if totalTime > 0 {
+                Divider()
+                HStack(spacing: 0) {
+                    Text("")
+                        .frame(width: 28)
+                    Text("Total")
+                        .font(.system(size: 10).bold())
+                        .frame(width: 60, alignment: .leading)
+                    Text(formatDuration(totalTime))
+                        .frame(width: 60, alignment: .trailing)
                 }
                 .font(.system(size: 10).monospacedDigit().bold())
                 .foregroundStyle(.secondary)

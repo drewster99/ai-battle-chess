@@ -939,9 +939,13 @@ final class GameEngine {
     }
 
     /// The move to highlight on the board — the viewed move during history navigation,
-    /// or the last played move during live play.
+    /// or the last played move during live play. Returns the viewed move only when both
+    /// `moveHistory` and `boardStates` contain `index`, matching `displayBoard`'s guard so
+    /// the highlight cannot outlive the position it belongs to.
     var displayedMove: ChessMove? {
-        if let index = viewingMoveIndex, index < moveHistory.count {
+        if let index = viewingMoveIndex,
+           index < moveHistory.count,
+           index < boardStates.count {
             return moveHistory[index]
         }
         return lastMove
@@ -1106,16 +1110,18 @@ final class GameEngine {
         guard player.isAI else { return nil }
 
         if player.useAppleIntelligence {
-            guard let configID = player.appleIntelligenceConfigID,
-                  let config = appleIntelligenceConfigManager.config(byID: configID) else {
+            let appleIntelligenceConfig = player.appleIntelligenceConfigID
+                .flatMap { appleIntelligenceConfigManager.config(byID: $0) }
+                ?? appleIntelligenceConfigManager.configs.first
+            guard let appleIntelligenceConfig else {
                 return "Apple Intelligence"
             }
             var parts = ["Apple Intelligence"]
-            parts.append(config.samplingDescription)
-            if let temp = config.temperature {
+            parts.append(appleIntelligenceConfig.samplingDescription)
+            if let temp = appleIntelligenceConfig.temperature {
                 parts.append("temp=\(String(format: "%.2f", temp))")
             }
-            if let tokens = config.maximumResponseTokens {
+            if let tokens = appleIntelligenceConfig.maximumResponseTokens {
                 parts.append("maxTokens=\(tokens)")
             }
             return parts.joined(separator: ", ")

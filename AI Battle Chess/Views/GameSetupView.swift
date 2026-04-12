@@ -22,6 +22,11 @@ struct GameSetupView: View {
     @State private var pgnText: String = ""
     @State private var whiteAllowResign: Bool = true
     @State private var blackAllowResign: Bool = true
+    @State private var showGuestNamePrompt: Bool = false
+    @State private var guestPromptWhitePickedID: UUID? = nil
+    @State private var guestPromptWhiteNewName: String = ""
+    @State private var guestPromptBlackPickedID: UUID? = nil
+    @State private var guestPromptBlackNewName: String = ""
 
     private var configurations: [ModelConfiguration] {
         engine.llmKit.configurations.filter(\.isValid)
@@ -115,6 +120,9 @@ struct GameSetupView: View {
         .sheet(isPresented: $showProviderSettings) {
             ProviderSettingsView(llmKit: engine.llmKit,
                                 appleIntelligenceConfigManager: engine.appleIntelligenceConfigManager)
+        }
+        .sheet(isPresented: $showGuestNamePrompt) {
+            guestNamePromptSheet
         }
         .alert("New Player", isPresented: $showAddPlayer) {
             TextField("Name", text: $newPlayerName)
@@ -352,6 +360,22 @@ struct GameSetupView: View {
     // MARK: - Actions
 
     private func startGame() {
+        let whiteIsGuestHuman = !whiteIsAI && whiteHumanPlayerID == HumanPlayer.guestID
+        let blackIsGuestHuman = !blackIsAI && blackHumanPlayerID == HumanPlayer.guestID
+
+        if whiteIsGuestHuman || blackIsGuestHuman {
+            guestPromptWhitePickedID = nil
+            guestPromptWhiteNewName = ""
+            guestPromptBlackPickedID = nil
+            guestPromptBlackNewName = ""
+            showGuestNamePrompt = true
+            return
+        }
+
+        commitStartGame()
+    }
+
+    private func commitStartGame() {
         // Build white player config
         let whiteConfig = buildPlayerConfig(
             name: whitePlayerName,
@@ -401,6 +425,152 @@ struct GameSetupView: View {
             }
         }
         return config
+    }
+
+    // MARK: - Guest Name Prompt
+
+    private var guestNamePromptSheet: some View {
+        let needWhite = !whiteIsAI && whiteHumanPlayerID == HumanPlayer.guestID
+        let needBlack = !blackIsAI && blackHumanPlayerID == HumanPlayer.guestID
+
+        return VStack(spacing: 20) {
+            Text("Who's playing?")
+                .font(.headline)
+
+            Text("Pick an existing player or enter a new name.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .top, spacing: 24) {
+                if needWhite {
+                    guestPromptColumn(
+                        title: "White",
+                        color: .white,
+                        pickedID: $guestPromptWhitePickedID,
+                        newName: $guestPromptWhiteNewName
+                    )
+                }
+                if needWhite && needBlack {
+                    Divider().frame(height: 200)
+                }
+                if needBlack {
+                    guestPromptColumn(
+                        title: "Black",
+                        color: .black,
+                        pickedID: $guestPromptBlackPickedID,
+                        newName: $guestPromptBlackNewName
+                    )
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    showGuestNamePrompt = false
+                }
+
+                Spacer()
+
+                Button("Start Game") {
+                    applyGuestPromptThenStart(needWhite: needWhite, needBlack: needBlack)
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(!guestPromptIsValid(needWhite: needWhite, needBlack: needBlack))
+            }
+        }
+        .padding(24)
+        .frame(minWidth: needWhite && needBlack ? 460 : 280)
+    }
+
+    private func guestPromptColumn(
+        title: String,
+        color: PieceColor,
+        pickedID: Binding<UUID?>,
+        newName: Binding<String>
+    ) -> some View {
+        let nonGuestPlayers = engine.humanPlayerManager.players.filter { !$0.isGuest }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(color == .white ? Color.white : Color.black)
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().strokeBorder(Color.gray, lineWidth: 1))
+                Text(title).font(.headline)
+            }
+
+            if !nonGuestPlayers.isEmpty {
+                Picker("Existing player", selection: pickedID) {
+                    Text("—").tag(nil as UUID?)
+                    ForEach(nonGuestPlayers) { player in
+                        Text(player.name).tag(Optional(player.id))
+                    }
+                }
+                .labelsHidden()
+                .onChange(of: pickedID.wrappedValue) { _, newValue in
+                    if newValue != nil {
+                        newName.wrappedValue = ""
+                    }
+                }
+            }
+
+            TextField("Or enter a new name", text: newName)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: newName.wrappedValue) { _, newValue in
+                    if !newValue.isEmpty {
+                        pickedID.wrappedValue = nil
+                    }
+                }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func guestPromptIsValid(needWhite: Bool, needBlack: Bool) -> Bool {
+        func sideValid(picked: UUID?, name: String) -> Bool {
+            if picked != nil { return true }
+            return !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if needWhite && !sideValid(picked: guestPromptWhitePickedID, name: guestPromptWhiteNewName) {
+            return false
+        }
+        if needBlack && !sideValid(picked: guestPromptBlackPickedID, name: guestPromptBlackNewName) {
+            return false
+        }
+        return true
+    }
+
+    private func applyGuestPromptThenStart(needWhite: Bool, needBlack: Bool) {
+        if needWhite {
+            if let pickedID = guestPromptWhitePickedID,
+               let player = engine.humanPlayerManager.player(byID: pickedID) {
+                whiteHumanPlayerID = player.id
+                whitePlayerName = player.name
+            } else {
+                let trimmed = guestPromptWhiteNewName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    let newPlayer = engine.humanPlayerManager.addPlayer(name: trimmed)
+                    whiteHumanPlayerID = newPlayer.id
+                    whitePlayerName = newPlayer.name
+                }
+            }
+        }
+        if needBlack {
+            if let pickedID = guestPromptBlackPickedID,
+               let player = engine.humanPlayerManager.player(byID: pickedID) {
+                blackHumanPlayerID = player.id
+                blackPlayerName = player.name
+            } else {
+                let trimmed = guestPromptBlackNewName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    let newPlayer = engine.humanPlayerManager.addPlayer(name: trimmed)
+                    blackHumanPlayerID = newPlayer.id
+                    blackPlayerName = newPlayer.name
+                }
+            }
+        }
+
+        showGuestNamePrompt = false
+        commitStartGame()
     }
 
     // MARK: - Last Player Setup Persistence
