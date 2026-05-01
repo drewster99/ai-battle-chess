@@ -381,6 +381,12 @@ final class GameEngine {
             }
 
             if legalMovesForSelected.contains(position) {
+                // Don't begin a new move animation while another is still in
+                // flight — that causes SwiftUI to interpolate the overlay piece
+                // from the prior animation's mid-flight pose, distorting the
+                // new piece's path.
+                guard animatingMove == nil else { return }
+
                 // Check if this is a pawn promotion
                 if let piece = board.piece(at: selected), piece.type == .pawn {
                     let promoRank = piece.color == .white ? 7 : 0
@@ -417,6 +423,7 @@ final class GameEngine {
 
     func selectPromotion(_ type: PieceType) {
         guard let promo = pendingPromotion else { return }
+        guard animatingMove == nil else { return }
         pendingPromotion = nil
         executeHumanMove(from: promo.from, to: promo.to, promotion: type)
     }
@@ -460,22 +467,8 @@ final class GameEngine {
         // Store board state before the move
         boardStates.append(board)
 
-        // Instantly complete any in-flight animation before starting the new one.
-        // Using a zero-duration transaction prevents SwiftUI from interpolating
-        // from the mid-flight position, which causes a visual snap-back glitch.
-        if animatingMove != nil {
-            animationTask?.cancel()
-            animationTask = nil
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                animatingMove = nil
-                animatingFileDelta = 0
-                animatingRankDelta = 0
-            }
-        }
-
-        // Set up animation: piece starts at source offset, animates to zero
+        // Callers (AI task and human input gates) ensure no animation is
+        // in flight here, so we can set up the new animation directly.
         animatingMove = annotatedMove
         animatingFileDelta = move.from.file - move.to.file
         animatingRankDelta = move.from.rank - move.to.rank
@@ -599,6 +592,8 @@ final class GameEngine {
                 // Handle the AI's action
                 switch aiResult.result {
                 case .move(let move):
+                    await self.awaitAnimationCompletion()
+                    guard !Task.isCancelled, gameID == self.currentGameID else { return }
                     applyMove(move)
                 case .resignation(let winner):
                     let gameEnd = GameResult.resignation(winner: winner)
@@ -644,6 +639,8 @@ final class GameEngine {
                         )
                         statistics.aiPenalties[color, default: []].append(penalty)
                         statusMessage = "Safety filter triggered — \(color.displayName) plays random move"
+                        await self.awaitAnimationCompletion()
+                        guard !Task.isCancelled, gameID == self.currentGameID else { return }
                         applyMove(randomMove)
                     } else {
                         // No legal moves — shouldn't happen (would be checkmate/stalemate already)
@@ -745,6 +742,7 @@ final class GameEngine {
     /// Navigates to the next move with animation (triggered by space bar).
     func navigateNextAnimated() {
         guard isViewingHistory, let currentIndex = viewingMoveIndex else { return }
+        guard animatingMove == nil else { return }
         let nextIndex = currentIndex + 1
         guard nextIndex < moveHistory.count else {
             returnToLive()
@@ -764,6 +762,14 @@ final class GameEngine {
         let distance = max(abs(move.to.file - move.from.file), abs(move.to.rank - move.from.rank))
         let duration = max(Double(distance) / 2.5, 0.30)
         startMoveAnimation(moveID: move.id, duration: duration)
+    }
+
+    /// Awaits completion of any in-flight move animation so callers can serialize
+    /// against the visual animation. Returns immediately if no animation is running.
+    private func awaitAnimationCompletion() async {
+        if let task = animationTask {
+            await task.value
+        }
     }
 
     /// Defers the offset-to-zero animation to the next run loop tick so SwiftUI
