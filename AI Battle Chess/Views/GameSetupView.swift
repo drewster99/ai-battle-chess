@@ -22,6 +22,14 @@ struct GameSetupView: View {
     @State private var pgnText: String = ""
     @State private var whiteAllowResign: Bool = true
     @State private var blackAllowResign: Bool = true
+    @State private var whiteTemperatureOverride: Double? = nil
+    @State private var blackTemperatureOverride: Double? = nil
+    @State private var whiteMaxOutputTokensOverride: Int? = nil
+    @State private var blackMaxOutputTokensOverride: Int? = nil
+    @State private var whiteThinkingBudgetOverride: Int? = nil
+    @State private var blackThinkingBudgetOverride: Int? = nil
+    @State private var whiteSamplingModeOverride: AISamplingMode? = nil
+    @State private var blackSamplingModeOverride: AISamplingMode? = nil
     @State private var showGuestNamePrompt: Bool = false
     @State private var guestPromptWhitePickedID: UUID? = nil
     @State private var guestPromptWhiteNewName: String = ""
@@ -44,6 +52,39 @@ struct GameSetupView: View {
             return AppleIntelligenceService.isAvailable
         }
         return false
+    }
+
+    /// A wrapping binding for the white AI selection that clears per-game parameter
+    /// overrides when the user picks a different model. Restoration code writes
+    /// directly to `whiteAISelection` and bypasses this clear, preserving saved overrides.
+    private var whiteAISelectionBinding: Binding<AISelection?> {
+        Binding(
+            get: { whiteAISelection },
+            set: { newValue in
+                if newValue != whiteAISelection {
+                    whiteTemperatureOverride = nil
+                    whiteMaxOutputTokensOverride = nil
+                    whiteThinkingBudgetOverride = nil
+                    whiteSamplingModeOverride = nil
+                }
+                whiteAISelection = newValue
+            }
+        )
+    }
+
+    private var blackAISelectionBinding: Binding<AISelection?> {
+        Binding(
+            get: { blackAISelection },
+            set: { newValue in
+                if newValue != blackAISelection {
+                    blackTemperatureOverride = nil
+                    blackMaxOutputTokensOverride = nil
+                    blackThinkingBudgetOverride = nil
+                    blackSamplingModeOverride = nil
+                }
+                blackAISelection = newValue
+            }
+        )
     }
 
     /// Configurations grouped by provider, then by model.
@@ -72,22 +113,30 @@ struct GameSetupView: View {
                     color: .white,
                     playerName: $whitePlayerName,
                     isAI: $whiteIsAI,
-                    aiSelection: $whiteAISelection,
+                    aiSelection: whiteAISelectionBinding,
                     humanPlayerID: $whiteHumanPlayerID,
-                    allowResign: $whiteAllowResign
+                    allowResign: $whiteAllowResign,
+                    temperatureOverride: $whiteTemperatureOverride,
+                    maxOutputTokensOverride: $whiteMaxOutputTokensOverride,
+                    thinkingBudgetOverride: $whiteThinkingBudgetOverride,
+                    samplingModeOverride: $whiteSamplingModeOverride
                 )
 
                 Divider()
-                    .frame(height: 250)
+                    .frame(height: 320)
 
                 playerSetup(
                     title: "Black",
                     color: .black,
                     playerName: $blackPlayerName,
                     isAI: $blackIsAI,
-                    aiSelection: $blackAISelection,
+                    aiSelection: blackAISelectionBinding,
                     humanPlayerID: $blackHumanPlayerID,
-                    allowResign: $blackAllowResign
+                    allowResign: $blackAllowResign,
+                    temperatureOverride: $blackTemperatureOverride,
+                    maxOutputTokensOverride: $blackMaxOutputTokensOverride,
+                    thinkingBudgetOverride: $blackThinkingBudgetOverride,
+                    samplingModeOverride: $blackSamplingModeOverride
                 )
             }
 
@@ -189,7 +238,11 @@ struct GameSetupView: View {
         isAI: Binding<Bool>,
         aiSelection: Binding<AISelection?>,
         humanPlayerID: Binding<UUID>,
-        allowResign: Binding<Bool>
+        allowResign: Binding<Bool>,
+        temperatureOverride: Binding<Double?>,
+        maxOutputTokensOverride: Binding<Int?>,
+        thinkingBudgetOverride: Binding<Int?>,
+        samplingModeOverride: Binding<AISamplingMode?>
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -213,6 +266,13 @@ struct GameSetupView: View {
                 TextField("Player Name", text: playerName)
                     .textFieldStyle(.roundedBorder)
                 aiModelPicker(selection: aiSelection)
+                modelParameterControls(
+                    aiSelection: aiSelection.wrappedValue,
+                    temperatureOverride: temperatureOverride,
+                    maxOutputTokensOverride: maxOutputTokensOverride,
+                    thinkingBudgetOverride: thinkingBudgetOverride,
+                    samplingModeOverride: samplingModeOverride
+                )
                 Toggle("Allow resignation", isOn: allowResign)
                     .font(.caption)
             } else {
@@ -242,6 +302,203 @@ struct GameSetupView: View {
                 playerName.wrappedValue = aiDisplayName(for: selection)
             } else {
                 playerName.wrappedValue = "AI Opponent"
+            }
+        }
+    }
+
+    // MARK: - Model Parameter Controls
+
+    /// Per-game overrides for the selected AI's temperature, max output tokens,
+    /// thinking budget (LLM providers), and sampling mode (Apple Intelligence).
+    /// Each TextField shows the currently-selected config's default as its placeholder;
+    /// a non-nil binding value is written into the resulting `PlayerConfig` as an override.
+    @ViewBuilder
+    private func modelParameterControls(
+        aiSelection: AISelection?,
+        temperatureOverride: Binding<Double?>,
+        maxOutputTokensOverride: Binding<Int?>,
+        thinkingBudgetOverride: Binding<Int?>,
+        samplingModeOverride: Binding<AISamplingMode?>
+    ) -> some View {
+        switch aiSelection {
+        case .llmConfig(let configID):
+            let config = engine.llmKit.configurations.first(where: { $0.id == configID })
+            let provider = config.flatMap { c in
+                engine.llmKit.providers.first(where: { $0.id == c.providerID })
+            }
+            let isAnthropic = provider?.apiType == .anthropic
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Model Parameters")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 6) {
+                    Text("Temp")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        config.map { String(format: "%.2f", $0.temperature) } ?? "—",
+                        value: temperatureOverride,
+                        format: .number
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 70)
+                }
+
+                HStack(spacing: 6) {
+                    Text("Max Tokens")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        config.map { "\($0.maxOutputTokens)" } ?? "—",
+                        value: maxOutputTokensOverride,
+                        format: .number
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+                }
+
+                if isAnthropic {
+                    HStack(spacing: 6) {
+                        Text("Thinking")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        TextField(
+                            config.flatMap(\.thinkingBudget).map(String.init) ?? "off",
+                            value: thinkingBudgetOverride,
+                            format: .number
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 90)
+                    }
+                }
+            }
+        case .appleIntelligence(let configID):
+            let config = engine.appleIntelligenceConfigManager.config(byID: configID)
+            let effectiveSampling = samplingModeOverride.wrappedValue ?? config?.samplingMode ?? .greedy
+            let samplingIsGreedy: Bool = {
+                if case .greedy = effectiveSampling { return true }
+                return false
+            }()
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Model Parameters")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                appleSamplingPicker(
+                    configDefault: config?.samplingMode ?? .greedy,
+                    samplingModeOverride: samplingModeOverride
+                )
+
+                HStack(spacing: 6) {
+                    Text("Temp")
+                        .font(.caption2)
+                        .foregroundStyle(samplingIsGreedy ? .tertiary : .secondary)
+                    TextField(
+                        config?.temperature.map { String(format: "%.2f", $0) } ?? "default",
+                        value: temperatureOverride,
+                        format: .number
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 70)
+                    .disabled(samplingIsGreedy)
+                }
+                if samplingIsGreedy {
+                    Text("Greedy sampling ignores temperature.\nPick Random p or Random top-N to set it.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                HStack(spacing: 6) {
+                    Text("Max Tokens")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        config?.maximumResponseTokens.map(String.init) ?? "default",
+                        value: maxOutputTokensOverride,
+                        format: .number
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+                }
+            }
+        case .none:
+            EmptyView()
+        }
+    }
+
+    /// Picks an Apple Intelligence sampling mode: greedy, random top-p (mass), or random top-k.
+    /// Picking greedy writes nil (use config default) when the config's own mode is greedy —
+    /// this keeps the override meaningful only when it differs from the stored config.
+    private func appleSamplingPicker(
+        configDefault: AISamplingMode,
+        samplingModeOverride: Binding<AISamplingMode?>
+    ) -> some View {
+        let effective = samplingModeOverride.wrappedValue ?? configDefault
+
+        let kindBinding = Binding<Int>(
+            get: {
+                switch effective {
+                case .greedy: return 0
+                case .randomMass: return 1
+                case .randomTopN: return 2
+                }
+            },
+            set: { newValue in
+                switch newValue {
+                case 1:
+                    samplingModeOverride.wrappedValue = .randomMass(0.9)
+                case 2:
+                    samplingModeOverride.wrappedValue = .randomTopN(40)
+                default:
+                    samplingModeOverride.wrappedValue = .greedy
+                }
+            }
+        )
+
+        return VStack(alignment: .leading, spacing: 4) {
+            Picker("Sampling", selection: kindBinding) {
+                Text("Greedy").tag(0)
+                Text("Random p").tag(1)
+                Text("Random top-N").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch effective {
+            case .greedy:
+                EmptyView()
+            case .randomMass(let mass):
+                HStack(spacing: 6) {
+                    Text("p")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Slider(
+                        value: Binding(
+                            get: { mass },
+                            set: { samplingModeOverride.wrappedValue = .randomMass($0) }
+                        ),
+                        in: 0.05...1.0
+                    )
+                    Text(String(format: "%.2f", mass))
+                        .font(.caption2.monospacedDigit())
+                        .frame(width: 34, alignment: .trailing)
+                }
+            case .randomTopN(let n):
+                HStack(spacing: 6) {
+                    Text("N")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Stepper(
+                        value: Binding(
+                            get: { n },
+                            set: { samplingModeOverride.wrappedValue = .randomTopN($0) }
+                        ),
+                        in: 1...200
+                    ) {
+                        Text("\(n)").font(.caption2.monospacedDigit())
+                    }
+                }
             }
         }
     }
@@ -412,11 +669,50 @@ struct GameSetupView: View {
     }
 
     private func commitStartGame() {
+        // Resolve any per-game parameter tweaks into a concrete configuration ID,
+        // finding or creating a configuration that matches the effective params.
+        let resolvedWhiteSelection = resolveSelection(
+            base: whiteAISelection,
+            temperatureOverride: whiteTemperatureOverride,
+            maxOutputTokensOverride: whiteMaxOutputTokensOverride,
+            thinkingBudgetOverride: whiteThinkingBudgetOverride,
+            samplingModeOverride: whiteSamplingModeOverride
+        )
+        let resolvedBlackSelection = resolveSelection(
+            base: blackAISelection,
+            temperatureOverride: blackTemperatureOverride,
+            maxOutputTokensOverride: blackMaxOutputTokensOverride,
+            thinkingBudgetOverride: blackThinkingBudgetOverride,
+            samplingModeOverride: blackSamplingModeOverride
+        )
+        // Point the picker state at the resolved selection so it is what gets
+        // saved to `SavedSideSetup` below and is what the user sees next time.
+        if whiteIsAI {
+            whiteAISelection = resolvedWhiteSelection
+            if let selection = resolvedWhiteSelection {
+                whitePlayerName = aiDisplayName(for: selection)
+            }
+            whiteTemperatureOverride = nil
+            whiteMaxOutputTokensOverride = nil
+            whiteThinkingBudgetOverride = nil
+            whiteSamplingModeOverride = nil
+        }
+        if blackIsAI {
+            blackAISelection = resolvedBlackSelection
+            if let selection = resolvedBlackSelection {
+                blackPlayerName = aiDisplayName(for: selection)
+            }
+            blackTemperatureOverride = nil
+            blackMaxOutputTokensOverride = nil
+            blackThinkingBudgetOverride = nil
+            blackSamplingModeOverride = nil
+        }
+
         // Build white player config
         let whiteConfig = buildPlayerConfig(
             name: whitePlayerName,
             isAI: whiteIsAI,
-            aiSelection: whiteAISelection,
+            aiSelection: resolvedWhiteSelection,
             color: .white,
             humanPlayerID: whiteHumanPlayerID,
             allowResign: whiteAllowResign
@@ -426,7 +722,7 @@ struct GameSetupView: View {
         let blackConfig = buildPlayerConfig(
             name: blackPlayerName,
             isAI: blackIsAI,
-            aiSelection: blackAISelection,
+            aiSelection: resolvedBlackSelection,
             color: .black,
             humanPlayerID: blackHumanPlayerID,
             allowResign: blackAllowResign
@@ -447,6 +743,199 @@ struct GameSetupView: View {
         saveLastSetup()
         engine.startNewGame()
         dismiss()
+    }
+
+    // MARK: - Configuration Resolver
+
+    /// Resolves a base AI selection plus per-game parameter tweaks into a
+    /// concrete configuration. If an existing configuration matches the
+    /// effective parameters, it is reused so repeated tweaks map back to the
+    /// same "player" identity for history. Otherwise a new configuration is
+    /// created (via `addConfiguration` / `addConfig`) with a derived name.
+    private func resolveSelection(
+        base: AISelection?,
+        temperatureOverride: Double?,
+        maxOutputTokensOverride: Int?,
+        thinkingBudgetOverride: Int?,
+        samplingModeOverride: AISamplingMode?
+    ) -> AISelection? {
+        guard let base else { return nil }
+        switch base {
+        case .llmConfig(let baseID):
+            return resolveLLMConfig(
+                baseID: baseID,
+                temperatureOverride: temperatureOverride,
+                maxOutputTokensOverride: maxOutputTokensOverride,
+                thinkingBudgetOverride: thinkingBudgetOverride
+            ).map(AISelection.llmConfig)
+        case .appleIntelligence(let baseID):
+            return resolveAppleIntelligenceConfig(
+                baseID: baseID,
+                temperatureOverride: temperatureOverride,
+                maxOutputTokensOverride: maxOutputTokensOverride,
+                samplingModeOverride: samplingModeOverride
+            ).map(AISelection.appleIntelligence)
+        }
+    }
+
+    /// Finds or creates a `ModelConfiguration` that matches the base plus the
+    /// effective temperature / max output tokens / thinking budget. Returns the
+    /// resolved configuration's ID, or the base ID if no tweaks applied.
+    private func resolveLLMConfig(
+        baseID: UUID,
+        temperatureOverride: Double?,
+        maxOutputTokensOverride: Int?,
+        thinkingBudgetOverride: Int?
+    ) -> UUID? {
+        guard let base = engine.llmKit.configurations.first(where: { $0.id == baseID }) else {
+            return nil
+        }
+        let effectiveTemperature = temperatureOverride ?? base.temperature
+        let effectiveMaxOutputTokens = maxOutputTokensOverride ?? base.maxOutputTokens
+        let effectiveThinkingBudget = thinkingBudgetOverride ?? base.thinkingBudget
+
+        let noChange = effectiveTemperature == base.temperature
+            && effectiveMaxOutputTokens == base.maxOutputTokens
+            && effectiveThinkingBudget == base.thinkingBudget
+        if noChange {
+            return base.id
+        }
+
+        // Look for an existing configuration that matches the effective params.
+        if let match = engine.llmKit.configurations.first(where: { candidate in
+            candidate.providerID == base.providerID &&
+            candidate.modelID == base.modelID &&
+            candidate.maxContextTokens == base.maxContextTokens &&
+            candidate.useDefaultTemperature == base.useDefaultTemperature &&
+            candidate.streaming == base.streaming &&
+            candidate.extendedCacheTTL == base.extendedCacheTTL &&
+            candidate.temperature == effectiveTemperature &&
+            candidate.maxOutputTokens == effectiveMaxOutputTokens &&
+            candidate.thinkingBudget == effectiveThinkingBudget
+        }) {
+            return match.id
+        }
+
+        // No match — create a new derived configuration.
+        let derived = ModelConfiguration(
+            name: derivedLLMConfigName(
+                base: base,
+                temperature: effectiveTemperature,
+                maxOutputTokens: effectiveMaxOutputTokens,
+                thinkingBudget: effectiveThinkingBudget
+            ),
+            providerID: base.providerID,
+            modelID: base.modelID,
+            temperature: effectiveTemperature,
+            maxOutputTokens: effectiveMaxOutputTokens,
+            maxContextTokens: base.maxContextTokens,
+            thinkingBudget: effectiveThinkingBudget,
+            extendedCacheTTL: base.extendedCacheTTL,
+            useDefaultTemperature: base.useDefaultTemperature,
+            streaming: base.streaming
+        )
+        engine.llmKit.addConfiguration(derived)
+        return derived.id
+    }
+
+    /// Builds a human-readable name for a derived LLM config that notes only
+    /// the fields which differ from the base (e.g. "Claude Sonnet [t=0.30, think=2000]").
+    private func derivedLLMConfigName(
+        base: ModelConfiguration,
+        temperature: Double,
+        maxOutputTokens: Int,
+        thinkingBudget: Int?
+    ) -> String {
+        var parts: [String] = []
+        if temperature != base.temperature {
+            parts.append(String(format: "t=%.2f", temperature))
+        }
+        if maxOutputTokens != base.maxOutputTokens {
+            parts.append("max=\(maxOutputTokens)")
+        }
+        if thinkingBudget != base.thinkingBudget {
+            parts.append("think=\(thinkingBudget.map(String.init) ?? "off")")
+        }
+        if parts.isEmpty { return base.name }
+        return "\(base.name) [\(parts.joined(separator: ", "))]"
+    }
+
+    /// Finds or creates an `AppleIntelligenceConfig` that matches the effective
+    /// params. If the effective sampling mode is greedy, the temperature override
+    /// is discarded because Apple Intelligence ignores temperature under greedy
+    /// sampling (it always picks argmax from the logits).
+    private func resolveAppleIntelligenceConfig(
+        baseID: UUID,
+        temperatureOverride: Double?,
+        maxOutputTokensOverride: Int?,
+        samplingModeOverride: AISamplingMode?
+    ) -> UUID? {
+        guard let base = engine.appleIntelligenceConfigManager.config(byID: baseID) else {
+            return nil
+        }
+        let effectiveSampling = samplingModeOverride ?? base.samplingMode
+        let effectiveMaxTokens = maxOutputTokensOverride ?? base.maximumResponseTokens
+        let effectiveTemperature: Double?
+        if case .greedy = effectiveSampling {
+            effectiveTemperature = nil
+        } else {
+            effectiveTemperature = temperatureOverride ?? base.temperature
+        }
+
+        let noChange = effectiveSampling == base.samplingMode
+            && effectiveMaxTokens == base.maximumResponseTokens
+            && effectiveTemperature == base.temperature
+        if noChange {
+            return base.id
+        }
+
+        if let match = engine.appleIntelligenceConfigManager.configs.first(where: { candidate in
+            candidate.samplingMode == effectiveSampling &&
+            candidate.maximumResponseTokens == effectiveMaxTokens &&
+            candidate.temperature == effectiveTemperature
+        }) {
+            return match.id
+        }
+
+        let derived = engine.appleIntelligenceConfigManager.addConfig(
+            name: derivedAppleIntelligenceName(
+                base: base,
+                temperature: effectiveTemperature,
+                maxTokens: effectiveMaxTokens,
+                sampling: effectiveSampling
+            ),
+            temperature: effectiveTemperature,
+            maximumResponseTokens: effectiveMaxTokens,
+            samplingMode: effectiveSampling
+        )
+        return derived.id
+    }
+
+    private func derivedAppleIntelligenceName(
+        base: AppleIntelligenceConfig,
+        temperature: Double?,
+        maxTokens: Int?,
+        sampling: AISamplingMode
+    ) -> String {
+        var parts: [String] = []
+        if sampling != base.samplingMode {
+            switch sampling {
+            case .greedy:
+                parts.append("greedy")
+            case .randomMass(let mass):
+                parts.append(String(format: "p=%.2f", mass))
+            case .randomTopN(let n):
+                parts.append("top-\(n)")
+            }
+        }
+        if temperature != base.temperature {
+            parts.append(String(format: "t=%.2f", temperature ?? 0))
+        }
+        if maxTokens != base.maximumResponseTokens {
+            parts.append("max=\(maxTokens.map(String.init) ?? "default")")
+        }
+        if parts.isEmpty { return base.name }
+        return "\(base.name) [\(parts.joined(separator: ", "))]"
     }
 
     private func buildPlayerConfig(name: String, isAI: Bool, aiSelection: AISelection?, color: PieceColor, humanPlayerID: UUID?, allowResign: Bool = true) -> PlayerConfig {
