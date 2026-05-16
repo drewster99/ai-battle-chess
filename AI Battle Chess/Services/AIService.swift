@@ -452,7 +452,8 @@ final class AIService {
                     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
                     let responseBody = String(data: data, encoding: .utf8) ?? "(binary data)"
                     print("[AIService] HTTP \(statusCode) error — response body:\n\(responseBody)")
-                    throw AIError.httpError(statusCode: statusCode)
+                    let apiMessage = AIService.extractAPIErrorMessage(from: data)
+                    throw AIError.httpError(statusCode: statusCode, message: apiMessage)
                 }
 
                 consecutiveErrors = 0
@@ -606,7 +607,7 @@ final class AIService {
                 // 429 (rate limit) and 408 (request timeout) are retryable.
                 let retryableClientErrors: Set<Int> = [408, 429]
                 let isNonRetryable: Bool = {
-                    if case .httpError(let statusCode) = error as? AIError,
+                    if case .httpError(let statusCode, _) = error as? AIError,
                        (400...499).contains(statusCode), !retryableClientErrors.contains(statusCode) {
                         return true
                     }
@@ -694,6 +695,24 @@ final class AIService {
     private func buildConversationBody(prepared: PreparedRequest, systemMessage: String, messages: [ConversationMessage]) -> [String: Any] {
         var body = prepared.baseBody
         body["stream"] = false
+
+        // OpenAI's GPT-5.x and o-series reject `max_tokens` (require
+        // `max_completion_tokens`) and only accept temperature=1. SwiftLLMKit emits
+        // `max_tokens` and the configured temperature for every openAICompatible
+        // provider, so remap when the endpoint is OpenAI's own host. DeepSeek and
+        // other openAICompatible providers are unaffected.
+        let host = prepared.urlRequest.url?.host?.lowercased() ?? ""
+        let isOpenAIHost = host == "api.openai.com" || host.hasSuffix(".openai.com")
+        if prepared.providerType == .openAICompatible, isOpenAIHost {
+            if let tokens = body["max_tokens"] {
+                body.removeValue(forKey: "max_tokens")
+                body["max_completion_tokens"] = tokens
+            }
+            let modelID = (body["model"] as? String)?.lowercased() ?? ""
+            if AIService.openAIRestrictsTemperature(modelID: modelID) {
+                body.removeValue(forKey: "temperature")
+            }
+        }
 
         let apiMessages: [[String: Any]] = messages.map { msg in
             let role = msg.role == .user ? "user" : "assistant"
@@ -873,6 +892,36 @@ final class AIService {
         }
     }
 
+    /// True when an OpenAI model only accepts the default temperature (1) and
+    /// rejects any custom value. Covers GPT-5.x and o-series reasoning models.
+    static func openAIRestrictsTemperature(modelID: String) -> Bool {
+        let id = modelID.lowercased()
+        if id.hasPrefix("gpt-5") { return true }
+        if id.hasPrefix("o1") || id.hasPrefix("o3") || id.hasPrefix("o4") { return true }
+        return false
+    }
+
+    /// Pulls a human-readable error message out of a provider error response.
+    /// Handles OpenAI/openAICompatible/Anthropic/Gemini `{"error":{"message":"..."}}`
+    /// shapes; returns nil when the body isn't JSON or has no recognizable message.
+    static func extractAPIErrorMessage(from data: Data) -> String? {
+        let parsed: Any
+        do {
+            parsed = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            return nil
+        }
+        guard let json = parsed as? [String: Any] else { return nil }
+        if let errorObj = json["error"] as? [String: Any],
+           let message = errorObj["message"] as? String, !message.isEmpty {
+            return message
+        }
+        if let message = json["message"] as? String, !message.isEmpty {
+            return message
+        }
+        return nil
+    }
+
     /// Checks if the AI response indicates a resignation or draw claim.
     /// Returns the game result if so, nil if it's a normal move.
     /// Uses exact matching to avoid false positives from substring matches.
@@ -989,7 +1038,7 @@ struct AIServiceFailure: Error, LocalizedError {
 // MARK: - AI Errors
 
 enum AIError: Error, LocalizedError {
-    case httpError(statusCode: Int)
+    case httpError(statusCode: Int, message: String? = nil)
     case invalidResponse(String)
     case tooManyRetries
     case noConfigurationSelected
@@ -998,7 +1047,11 @@ enum AIError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .httpError(let code): return "HTTP error: \(code)"
+        case .httpError(let code, let message):
+            if let message, !message.isEmpty {
+                return "HTTP \(code): \(message)"
+            }
+            return "HTTP error: \(code)"
         case .invalidResponse(let msg): return "Invalid response: \(msg)"
         case .tooManyRetries: return "AI failed after \(AIConstants.maxRetries) attempts"
         case .noConfigurationSelected: return "No AI model configuration selected"
